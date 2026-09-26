@@ -317,7 +317,7 @@ final class StickyWindowManager: NSObject, NSWindowDelegate {
             guard let self else { return }
             await self.transitions[id]?.value
             guard let note = self.store.notes.first(where: { $0.id == id }), note.archivedAt == nil, note.deletedAt == nil else { return }
-            if !self.focus.allows(id) { self.exitFocus() }
+            guard self.focus.allows(id) else { return }
             self.show(id, near: point, focusTitle: focusTitle, from: cardFrame)
             await self.transitions[id]?.value
         }
@@ -425,6 +425,7 @@ final class StickyWindowManager: NSObject, NSWindowDelegate {
             await transitions[id]?.value
             do {
                 try await store.delete(id)
+                if focus.noteID == id { exitFocus() }
                 await dismiss(id, returningToEdge: false)
                 deleteUndo.show(on: screen, behavior: settings.collectionBehavior, undo: { [weak self] in
                     guard let self else { return }
@@ -463,7 +464,6 @@ final class StickyWindowManager: NSObject, NSWindowDelegate {
         }
         transitions[id] = task
         await task.value
-        if focus.noteID == id { exitFocus() }
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if let id = sender.identifier?.rawValue { close(id) }
@@ -561,7 +561,6 @@ final class StickyWindowManager: NSObject, NSWindowDelegate {
         saveGeometry(id)
     }
     func toggleHidden() {
-        focus.noteID = nil
         hidden.toggle()
         refreshVisibility()
     }

@@ -48,7 +48,22 @@ final class PrivacyMotionTests: XCTestCase {
         XCTAssertTrue(manager.windows[first.id]?.isVisible == true)
         XCTAssertFalse(manager.windows[second.id]?.isVisible == true)
         XCTAssertEqual(stripe.displayedNotes.map(\.id), [first.id])
-        manager.exitFocus()
+        manager.close(first.id)
+        for _ in 0..<200 {
+            if manager.windows[first.id] == nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNil(manager.windows[first.id])
+        XCTAssertEqual(manager.focus.noteID, first.id)
+        XCTAssertFalse(manager.windows[second.id]?.isVisible == true)
+        XCTAssertEqual(stripe.displayedNotes.map(\.id), [first.id])
+        manager.open(first.id, near: nil)
+        for _ in 0..<100 {
+            if manager.windows[first.id] != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(manager.focus.noteID, first.id)
+        manager.toggleFocus(first.id)
         XCTAssertTrue(manager.windows[first.id]?.isVisible == true)
         XCTAssertTrue(manager.windows[second.id]?.isVisible == true)
         XCTAssertEqual(Set(stripe.displayedNotes.map(\.id)), Set([first.id, second.id]))
