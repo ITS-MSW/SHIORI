@@ -31,6 +31,7 @@ struct SettingsView: View {
                 Stepper("Note Font Size: \(Int(settings.noteFontSize)) pt", value: $settings.noteFontSize, in: 14...24)
             }
             Section("Edge") {
+                Toggle("Compact mode", isOn: $settings.compactMode)
                 Picker("Screen edge", selection: $settings.edge) { Text("Left").tag("left"); Text("Right").tag("right") }
                 Button("Reset Edge and Window Positions", action: reset)
             }

@@ -29,6 +29,7 @@ final class SettingsStore: ObservableObject {
         didSet { if let data = try? JSONEncoder().encode(detachedGroups) { defaults.set(data, forKey: "detachedGroups") } }
     }
     let defaults: UserDefaults
+    @Published var compactMode: Bool { didSet { defaults.set(compactMode, forKey: "compactMode") } }
     @Published var edge: String { didSet { defaults.set(edge, forKey: "edge") } }
     @Published var anchor: Double { didSet { defaults.set(anchor, forKey: "anchor") } }
     @Published var openDelay: Double { didSet { defaults.set(openDelay, forKey: "openDelay") } }
@@ -57,6 +58,7 @@ final class SettingsStore: ObservableObject {
             .flatMap { try? JSONDecoder().decode([DetachedGroup].self, from: $0) }?
             .filter { $0.anchor.isFinite && (0...1).contains($0.anchor) && ["left", "right"].contains($0.edge) } ?? []
         defaults.register(defaults: ["edge": "right", "anchor": 0.5, "openDelay": 0.15, "closeDelay": 0.1, "acrossSpaces": true, "fullscreen": false, "noteFont": NoteBodyFont.architectsDaughter.rawValue, "noteFontSize": 16.0])
+        compactMode = defaults.bool(forKey: "compactMode")
         edge = defaults.string(forKey: "edge") == "left" ? "left" : "right"
         anchor = min(1, max(0, defaults.double(forKey: "anchor")))
         openDelay = max(0, defaults.double(forKey: "openDelay"))

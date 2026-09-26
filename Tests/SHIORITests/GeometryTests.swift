@@ -39,6 +39,39 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(settings.detachedGroups, original)
     }
 
+    @MainActor
+    func testCompactModePersistsAndFanStaysAnchoredToBothEdges() throws {
+        let suite = "tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(defaults: defaults)
+        XCTAssertFalse(settings.compactMode)
+        settings.compactMode = true
+        XCTAssertTrue(SettingsStore(defaults: defaults).compactMode)
+        for left in [false, true] {
+            XCTAssertEqual(CompactFanGeometry.angle(index: 0, count: 1, left: left), 0)
+            for index in 0..<CompactFanGeometry.capacity {
+                let angle = CompactFanGeometry.angle(index: index, count: CompactFanGeometry.capacity, left: left)
+                XCTAssertLessThanOrEqual(abs(angle), 32)
+                XCTAssertEqual(angle, -CompactFanGeometry.angle(index: index, count: CompactFanGeometry.capacity, left: !left))
+                let rect = NSRect(x: left ? -72 : 148, y: 162, width: 224, height: 76)
+                let pivot = NSPoint(x: left ? rect.minX : rect.maxX, y: rect.midY)
+                XCTAssertEqual(pivot.x, left ? -72 : CompactFanGeometry.panelWidth + 72)
+                let transform = AffineTransform(translationByX: pivot.x, byY: pivot.y)
+                var rotation = transform
+                rotation.rotate(byDegrees: angle)
+                rotation.translate(x: -pivot.x, y: -pivot.y)
+                for corner in [NSPoint(x: rect.minX, y: rect.minY), NSPoint(x: rect.minX, y: rect.maxY), NSPoint(x: rect.maxX, y: rect.minY), NSPoint(x: rect.maxX, y: rect.maxY)] {
+                    let point = rotation.transform(corner)
+                    XCTAssertTrue((0...CompactFanGeometry.panelHeight).contains(point.y))
+                    // The hinge side is clipped at the edge; the outer tips remain on screen.
+                    if left { XCTAssertLessThan(point.x, CompactFanGeometry.panelWidth) }
+                    else { XCTAssertGreaterThan(point.x, 0) }
+                }
+            }
+        }
+    }
+
     func testClampsDisconnectedAndNegativeDisplays() {
         let screens = [NSRect(x: -1440, y: -100, width: 1440, height: 900), NSRect(x: 0, y: 0, width: 1920, height: 1080)]
         let left = WindowGeometry.clamp(NSRect(x: -1500, y: -200, width: 360, height: 400), to: screens)

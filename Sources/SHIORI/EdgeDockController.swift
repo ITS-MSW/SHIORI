@@ -181,13 +181,13 @@ final class EdgeDockController: NSObject {
         guard let index = dockView.visibleNoteIndex(for: id) else { return nil }
         let expanded = frame(for: screen, expanded: true)
         let card = (phaseMachine.phase == .expanded || phaseMachine.phase == .pendingClose)
-            ? dockView.displayCardFrame(at: index) : dockView.cardFrame(at: index, width: expanded.width)
+            ? dockView.displayCardFrame(at: index) : dockView.cardFrame(at: index, width: expanded.width, height: expanded.height)
         return NSRect(x: expanded.minX + card.minX, y: expanded.minY + card.minY, width: card.width, height: card.height)
     }
 
     func returnFrame(for id: String) -> NSRect? {
         guard let screen = retainedScreen(), displayedNotes.contains(where: { $0.id == id }) else { return nil }
-        if appAttachment != nil {
+        if appAttachment != nil || settings.compactMode {
             let collapsed = frame(for: screen, expanded: false)
             return NSRect(x: edge == "left" ? collapsed.minX : collapsed.maxX - 14,
                           y: collapsed.minY, width: 14, height: collapsed.height)
@@ -228,8 +228,9 @@ final class EdgeDockController: NSObject {
         if dockView.notes != notes { dockView.notes = notes }
         let edge: DockView.Edge = self.edge == "left" ? .left : .right
         if dockView.edge != edge { dockView.edge = edge }
+        dockView.compactMode = settings.compactMode
         let availableCardHeight = max(0, screen.visibleFrame.height - DockView.plusHeight - DockView.cardPadding * 2 - DockView.cardHeight)
-        dockView.visibleCardLimit = max(1, Int(availableCardHeight / DockView.cardOverlap) + 1)
+        dockView.visibleCardLimit = settings.compactMode ? CompactFanGeometry.capacity : max(1, Int(availableCardHeight / DockView.cardOverlap) + 1)
         dockView.scrollLimit = max(0, notes.count - dockView.visibleCardLimit)
         dockView.scrollIndex = min(dockView.scrollIndex, dockView.scrollLimit)
         positionedDisplayID = Self.displayID(for: screen)
@@ -411,7 +412,7 @@ final class EdgeDockController: NSObject {
             }
         }
         guard expanded else {
-            let height = min(DockView.collapsedHeight, visibleFrame.height)
+            let height = min(settings.compactMode ? 24 : DockView.collapsedHeight, visibleFrame.height)
             let y = center - height / 2
             let x = edge == "left"
                 ? visibleFrame.minX
@@ -427,11 +428,11 @@ final class EdgeDockController: NSObject {
         let cardHeight = DockView.cardHeight
         let overlap = DockView.cardOverlap
         let visibleCount = min(dockView?.visibleCardLimit ?? 1, max(1, dockView?.notes.count ?? 0))
-        let desiredHeight = DockView.plusHeight + DockView.cardPadding * 2
+        let desiredHeight = settings.compactMode ? CompactFanGeometry.panelHeight : DockView.plusHeight + DockView.cardPadding * 2
             + cardHeight + CGFloat(max(0, visibleCount - 1)) * overlap
         let height = min(max(desiredHeight, DockView.collapsedHeight), screen.visibleFrame.height)
         let y = min(max(center - height / 2, screen.visibleFrame.minY), screen.visibleFrame.maxY - height)
-        let width = DockView.expandedWidth
+        let width = settings.compactMode ? CompactFanGeometry.panelWidth : DockView.expandedWidth
         let x = edge == "left" ? visibleFrame.minX : visibleFrame.maxX - width
         return NSRect(x: x, y: y, width: width, height: height)
     }
@@ -674,6 +675,19 @@ struct DockTransition {
     }
 }
 
+enum CompactFanGeometry {
+    static let ticketHeight: CGFloat = 76
+    static let panelWidth: CGFloat = 300
+    static let panelHeight: CGFloat = 400
+    static let capacity = 11
+
+    static func angle(index: Int, count: Int, left: Bool) -> CGFloat {
+        guard count > 1 else { return 0 }
+        let spread = min(64, CGFloat(count - 1) * 12)
+        return (CGFloat(index) / CGFloat(count - 1) - 0.5) * spread * (left ? -1 : 1)
+    }
+}
+
 @MainActor
 private final class DockView: NSView, NSDraggingSource {
     enum Edge { case left, right }
@@ -697,11 +711,13 @@ private final class DockView: NSView, NSDraggingSource {
     var notes: [Note] = [] {
         didSet {
             if notes.map(\.id) != oldValue.map(\.id) { resetHover() }
+            setAccessibilityValue("\(notes.count) notes")
             let ids = Set(notes.map(\.id))
             previewCache = previewCache.filter { ids.contains($0.key) }
             needsDisplay = true
         }
     }
+    var compactMode = false { didSet { if compactMode != oldValue { resetHover(); needsDisplay = true } } }
     var edge: Edge = .right { didSet { needsDisplay = true } }
     var visibleCardLimit = 1
     var scrollLimit = 0
@@ -823,7 +839,7 @@ private final class DockView: NSView, NSDraggingSource {
         let now = CACurrentMediaTime()
         let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if let transition = deckTransition {
-            deckProgress = reduced ? transition.to : transition.value(at: now, eased: false)
+            deckProgress = reduced ? transition.to : transition.value(at: now, eased: compactMode)
             if reduced || transition.finished(at: now) { deckTransition = nil }
         }
         for (index, transition) in hoverTransitions {
@@ -1021,32 +1037,33 @@ private final class DockView: NSView, NSDraggingSource {
     }
 
     private func drawCollapsed() {
-        let strip = NSRect(x: edge == .left ? 0 : bounds.width - 14, y: anchorY - 54, width: 14, height: 108)
+        let height: CGFloat = compactMode ? 24 : Self.collapsedHeight
+        let strip = NSRect(x: edge == .left ? 0 : bounds.width - 14, y: anchorY - height / 2, width: 14, height: height)
         NSColor.black.withAlphaComponent(0.14).setFill()
         NSBezierPath(roundedRect: strip, xRadius: 7, yRadius: 7).fill()
-        let colors = notes.isEmpty ? [0] : notes.map(\.colorIndex)
+        let colors = notes.isEmpty ? [0] : Array(notes.prefix(compactMode ? 1 : notes.count)).map(\.colorIndex)
         let gap: CGFloat = 4
-        let height = min(16, (92 - gap * CGFloat(colors.count - 1)) / CGFloat(colors.count))
-        let total = CGFloat(colors.count) * height + CGFloat(colors.count - 1) * gap
-        var y = anchorY + total / 2 - height
+        let markerHeight: CGFloat = compactMode ? 16 : min(16, (92 - gap * CGFloat(colors.count - 1)) / CGFloat(colors.count))
+        let total = CGFloat(colors.count) * markerHeight + CGFloat(colors.count - 1) * gap
+        var y = anchorY + total / 2 - markerHeight
         for color in colors {
             Theme.nsColor(color).setFill()
-            NSBezierPath(roundedRect: NSRect(x: strip.midX - 3, y: y, width: 6, height: max(1, height)), xRadius: 3, yRadius: 3).fill()
-            y -= height + gap
+            NSBezierPath(roundedRect: NSRect(x: strip.midX - 3, y: y, width: 6, height: max(1, markerHeight)), xRadius: 3, yRadius: 3).fill()
+            y -= markerHeight + gap
         }
     }
 
     private func drawDeck() {
         let rendered = renderedNotes
         // Draw lower cards last so each upper title strip remains visible.
-        for index in rendered.indices where liftProgress(at: index) == 0 {
+        for index in rendered.indices where compactMode || liftProgress(at: index) == 0 {
             drawCard(rendered[index], at: index, highlighted: false)
         }
         for index in rendered.indices where liftProgress(at: index) > 0 && index != visualHoveredIndex {
-            drawCard(rendered[index], at: index, highlighted: true)
+            drawCard(rendered[index], at: index, highlighted: true, opacity: compactMode ? liftProgress(at: index) : 1)
         }
         if let index = visualHoveredIndex, rendered.indices.contains(index), liftProgress(at: index) > 0 {
-            drawCard(rendered[index], at: index, highlighted: true)
+            drawCard(rendered[index], at: index, highlighted: true, opacity: compactMode ? liftProgress(at: index) : 1)
         }
 
         NSGraphicsContext.saveGraphicsState()
@@ -1063,9 +1080,10 @@ private final class DockView: NSView, NSDraggingSource {
         NSImage(systemSymbolName: "chevron.up.chevron.down", accessibilityDescription: "Move edge tabs")?.draw(in: gripFrame.insetBy(dx: 8, dy: 6))
     }
 
-    private func drawCard(_ note: Note, at index: Int, highlighted: Bool) {
+    private func drawCard(_ note: Note, at index: Int, highlighted: Bool, opacity: CGFloat = 1) {
         let rect = displayCardFrame(at: index)
         NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current?.cgContext.setAlpha(opacity)
         cardTransform(at: index).concat()
         defer { NSGraphicsContext.restoreGraphicsState() }
         let cardPath = NSBezierPath(roundedRect: rect, xRadius: 16, yRadius: 16)
@@ -1085,6 +1103,18 @@ private final class DockView: NSView, NSDraggingSource {
         NSGraphicsContext.saveGraphicsState()
         cardPath.addClip()
         defer { NSGraphicsContext.restoreGraphicsState() }
+        if compactMode {
+            let title = privacyLocked ? "Locked note" : (note.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled note" : note.title)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byTruncatingTail
+            (title as NSString).draw(in: NSRect(x: rect.minX + 16, y: rect.maxY - 30, width: rect.width - 32, height: 20), withAttributes: [
+                .font: Theme.roundedFont(size: 13, weight: .semibold), .foregroundColor: NSColor.black.withAlphaComponent(0.8), .paragraphStyle: paragraph
+            ])
+            if !privacyLocked, highlighted {
+                bodyPreview(note).draw(in: NSRect(x: rect.minX + 16, y: rect.minY + 12, width: rect.width - 32, height: 19))
+            }
+            return
+        }
         if privacyLocked {
             NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Locked note")?.draw(in: NSRect(x: edge == .left ? rect.maxX - 27 : rect.minX + 13, y: rect.maxY - 32, width: 14, height: 16))
             return
@@ -1171,8 +1201,13 @@ private final class DockView: NSView, NSDraggingSource {
         Self.timestampFormatter.string(from: Date(timeIntervalSince1970: value))
     }
 
-    fileprivate func cardFrame(at index: Int, width: CGFloat? = nil) -> NSRect {
+    fileprivate func cardFrame(at index: Int, width: CGFloat? = nil, height: CGFloat? = nil) -> NSRect {
         let contentWidth = width ?? bounds.width
+        if compactMode {
+            let x: CGFloat = edge == .left ? -72 : contentWidth - Self.cardWidth + 72
+            return NSRect(x: x, y: (height ?? bounds.height) / 2 - CompactFanGeometry.ticketHeight / 2,
+                          width: Self.cardWidth, height: CompactFanGeometry.ticketHeight)
+        }
         let exposed = Self.tabWidth
         let x = edge == .left ? exposed - Self.cardWidth : contentWidth - exposed
         let y = Self.cardPadding + CGFloat(max(0, visibleNotes.count - index - 1)) * Self.cardOverlap
@@ -1185,9 +1220,9 @@ private final class DockView: NSView, NSDraggingSource {
 
     fileprivate func displayCardFrame(at index: Int) -> NSRect {
         var frame = cardFrame(at: index)
-        let progress = Theme.Motion.deckProgress(deckProgress, index: index, count: visibleNotes.count)
-        let slide = (1 - progress) * (Self.cardWidth + 24)
-        let lift = Self.peekDistance * liftProgress(at: index)
+        let progress = compactMode ? deckProgress : Theme.Motion.deckProgress(deckProgress, index: index, count: visibleNotes.count)
+        let slide = (1 - progress) * (compactMode ? Self.cardWidth - 72 - 6 : Self.cardWidth + 24)
+        let lift = (compactMode ? 8 : Self.peekDistance) * liftProgress(at: index)
         frame.origin.x += (edge == .left ? -1 : 1) * (slide - lift)
         return frame
     }
@@ -1197,11 +1232,11 @@ private final class DockView: NSView, NSDraggingSource {
     }
 
     private var plusFrame: NSRect {
-        NSRect(x: edge == .left ? 8 : bounds.width - 36, y: bounds.maxY - 36, width: 28, height: 28)
+        NSRect(x: edge == .left ? 8 : bounds.width - 36, y: actionsFrame.maxY - 32, width: 28, height: 28)
     }
 
     private var actionsFrame: NSRect {
-        NSRect(x: edge == .left ? -18 : bounds.width - 44, y: bounds.maxY - Self.plusHeight,
+        NSRect(x: edge == .left ? -18 : bounds.width - 44, y: compactMode ? bounds.height / 2 + CompactFanGeometry.ticketHeight / 2 + 4 : bounds.maxY - Self.plusHeight,
                width: 62, height: Self.plusHeight - 4)
     }
 
@@ -1210,7 +1245,7 @@ private final class DockView: NSView, NSDraggingSource {
     }
 
     private var dockHitRect: NSRect {
-        NSRect(x: edge == .left ? 0 : bounds.width - 22, y: anchorY - 54, width: 22, height: 108)
+        NSRect(x: edge == .left ? 0 : bounds.width - 22, y: anchorY - (compactMode ? 12 : 54), width: 22, height: compactMode ? 24 : 108)
     }
 
     private var plusPath: NSBezierPath {
@@ -1223,8 +1258,11 @@ private final class DockView: NSView, NSDraggingSource {
         let transform = NSAffineTransform()
         let x = edge == .left ? rect.minX : rect.maxX
         transform.translateX(by: x, yBy: rect.midY)
-        let angle = (edge == .left ? -1.0 : 1.0) * (0.8 + Double(index % 3) * 0.35)
+        let angle = compactMode
+            ? CompactFanGeometry.angle(index: index, count: visibleNotes.count, left: edge == .left) * deckProgress
+            : (edge == .left ? -1.0 : 1.0) * (0.8 + Double(index % 3) * 0.35)
         transform.rotate(byDegrees: angle)
+        if compactMode { transform.scaleX(by: 1, yBy: 0.21 + 0.79 * deckProgress) }
         transform.translateX(by: -x, yBy: -rect.midY)
         return transform
     }
@@ -1272,7 +1310,7 @@ private final class DockView: NSView, NSDraggingSource {
     private func cardIndex(at point: NSPoint) -> Int? {
         guard isExpanded else { return nil }
         let atEdge = edge == .left ? point.x <= Self.tabWidth : point.x >= bounds.width - Self.tabWidth
-        if atEdge {
+        if atEdge && !compactMode {
             for index in visibleNotes.indices {
                 let frame = cardFrame(at: index)
                 if point.y <= frame.maxY && point.y > frame.maxY - Self.cardOverlap { return index }
@@ -1287,6 +1325,10 @@ private final class DockView: NSView, NSDraggingSource {
 
     private func targetIndex(at point: NSPoint) -> Int? {
         guard let source = dragIndex, visibleNotes.indices.contains(source) else { return nil }
+        if compactMode {
+            let target = cardIndex(at: point)
+            return target == source ? nil : target
+        }
         // Reorder by the exposed title strips, not the midpoint of a full sheet.
         let target = visibleNotes.indices.min {
             abs(point.y - (cardFrame(at: $0).maxY - Self.cardOverlap / 2)) <
@@ -1318,7 +1360,7 @@ private final class DockView: NSView, NSDraggingSource {
             return plusFrame
         case .note(let id):
             guard let index = visibleNotes.firstIndex(where: { $0.id == id }) else { return .zero }
-            return cardFrame(at: index)
+            return compactMode ? cardPath(at: index).bounds : cardFrame(at: index)
         case .grip:
             return isExpanded ? gripFrame : NSRect(x: edge == .left ? 8 : bounds.width - 24, y: anchorY - 24, width: 16, height: 48)
         }
