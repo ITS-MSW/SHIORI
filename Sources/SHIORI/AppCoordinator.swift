@@ -194,7 +194,10 @@ final class AppCoordinator: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let display = EdgeDockController.displayID(for: screen ?? NSScreen.main)
                 return display.flatMap { self.edgeTabs[$0]?.returnFrame(for: id) } ?? self.edgeTabs.values.first?.returnFrame(for: id)
             }
-            loaded.$notes.dropFirst().receive(on: RunLoop.main).sink { [weak self] _ in self?.synchronizeDetachedTabs() }.store(in: &subscriptions)
+            loaded.$notes
+                .map { Set($0.filter { $0.archivedAt == nil && $0.deletedAt == nil }.map(\.id)) }
+                .removeDuplicates().dropFirst().receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.synchronizeDetachedTabs() }.store(in: &subscriptions)
             synchronizeEdgeTabs()
             synchronizeDetachedTabs()
             manager.restorePinned()

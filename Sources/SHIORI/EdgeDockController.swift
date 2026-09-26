@@ -146,7 +146,7 @@ final class EdgeDockController: NSObject {
             .sink { [weak self] _ in self?.refreshLayout() }
         storeCancellable = store.$notes.dropFirst()
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.refreshLayout() }
+            .sink { [weak self] _ in self?.refreshNotes() }
     }
 
     fileprivate var isAppDock: Bool { appAttachment != nil }
@@ -172,6 +172,14 @@ final class EdgeDockController: NSObject {
 
     func refreshLayout() {
         refreshLayout(animated: true)
+    }
+
+    private func refreshNotes() {
+        guard let dockView else { return }
+        let notes = privacyLocked ? displayedNotes.map(PrivacyLock.concealed) : displayedNotes
+        guard notes != dockView.notes else { return }
+        guard notes.map(\.id) == dockView.notes.map(\.id) else { refreshLayout(); return }
+        dockView.notes = notes
     }
 
     /// Returns the projected card frame in screen coordinates without opening
