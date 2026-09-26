@@ -689,6 +689,24 @@ enum CompactFanGeometry {
     static let panelHeight: CGFloat = 400
     static let capacity = 11
 
+    static func transform(rect: NSRect, index: Int, count: Int, left: Bool, progress: CGFloat) -> NSAffineTransform {
+        let transform = NSAffineTransform()
+        let x = left ? rect.minX : rect.maxX
+        transform.translateX(by: x, yBy: rect.midY)
+        transform.rotate(byDegrees: angle(index: index, count: count, left: left) * progress)
+        transform.scaleX(by: 1, yBy: 0.21 + 0.79 * progress)
+        transform.translateX(by: -x, yBy: -rect.midY)
+        return transform
+    }
+
+    static func hoverIndex(at point: NSPoint, frame: NSRect, count: Int, left: Bool, progress: CGFloat) -> Int? {
+        (0..<count).reversed().first { index in
+            let path = NSBezierPath(roundedRect: frame, xRadius: Theme.corner, yRadius: Theme.corner)
+            path.transform(using: transform(rect: frame, index: index, count: count, left: left, progress: progress) as AffineTransform)
+            return path.contains(point)
+        }
+    }
+
     static func angle(index: Int, count: Int, left: Bool) -> CGFloat {
         guard count > 1 else { return 0 }
         let spread = min(64, CGFloat(count - 1) * 12)
@@ -791,7 +809,7 @@ private final class DockView: NSView, NSDraggingSource {
         guard bounds.contains(point) else { return false }
         if dockHitRect.contains(point) { return true }
         guard isExpanded else { return false }
-        return actionsFrame.contains(point) || visibleNotes.indices.contains { cardPath(at: $0).contains(point) }
+        return actionsFrame.contains(point) || (compactMode && compactHoverIndex(at: point) != nil) || visibleNotes.indices.contains { cardPath(at: $0).contains(point) }
     }
 
     fileprivate func updateHover(screenPoint: NSPoint, in panel: NSPanel) {
@@ -1226,11 +1244,11 @@ private final class DockView: NSView, NSDraggingSource {
         lifts[index] ?? 0
     }
 
-    fileprivate func displayCardFrame(at index: Int) -> NSRect {
+    fileprivate func displayCardFrame(at index: Int, includeHover: Bool = true) -> NSRect {
         var frame = cardFrame(at: index)
         let progress = compactMode ? deckProgress : Theme.Motion.deckProgress(deckProgress, index: index, count: visibleNotes.count)
         let slide = (1 - progress) * (compactMode ? Self.cardWidth - 72 - 6 : Self.cardWidth + 24)
-        let lift = (compactMode ? 8 : Self.peekDistance) * liftProgress(at: index)
+        let lift = includeHover ? (compactMode ? 14 : Self.peekDistance) * liftProgress(at: index) : 0
         frame.origin.x += (edge == .left ? -1 : 1) * (slide - lift)
         return frame
     }
@@ -1263,14 +1281,14 @@ private final class DockView: NSView, NSDraggingSource {
 
     private func cardTransform(at index: Int) -> NSAffineTransform {
         let rect = displayCardFrame(at: index)
+        if compactMode {
+            return CompactFanGeometry.transform(rect: rect, index: index, count: visibleNotes.count, left: edge == .left, progress: deckProgress)
+        }
         let transform = NSAffineTransform()
         let x = edge == .left ? rect.minX : rect.maxX
         transform.translateX(by: x, yBy: rect.midY)
-        let angle = compactMode
-            ? CompactFanGeometry.angle(index: index, count: visibleNotes.count, left: edge == .left) * deckProgress
-            : (edge == .left ? -1.0 : 1.0) * (0.8 + Double(index % 3) * 0.35)
+        let angle = (edge == .left ? -1.0 : 1.0) * (0.8 + Double(index % 3) * 0.35)
         transform.rotate(byDegrees: angle)
-        if compactMode { transform.scaleX(by: 1, yBy: 0.21 + 0.79 * deckProgress) }
         transform.translateX(by: -x, yBy: -rect.midY)
         return transform
     }
@@ -1308,17 +1326,27 @@ private final class DockView: NSView, NSDraggingSource {
                 lifts[card] = target
                 hoverTransitions[card] = nil
             } else if hoverTransitions[card]?.to != target {
-                hoverTransitions[card] = current == target ? nil : DockTransition(from: current, to: target, began: now, duration: Theme.Motion.hover)
+                hoverTransitions[card] = current == target ? nil : DockTransition(from: current, to: target, began: now, duration: compactMode ? (target == 1 ? Theme.Motion.compactHoverEnter : Theme.Motion.compactHoverExit) : Theme.Motion.hover)
             }
         }
         needsDisplay = true
         if !hoverTransitions.isEmpty { startDisplayLink() }
     }
 
+    private func compactHoverIndex(at point: NSPoint) -> Int? {
+        CompactFanGeometry.hoverIndex(at: point, frame: displayCardFrame(at: 0, includeHover: false), count: visibleNotes.count, left: edge == .left, progress: deckProgress)
+    }
+
     private func cardIndex(at point: NSPoint) -> Int? {
         guard isExpanded else { return nil }
+        if compactMode {
+            if actionsFrame.contains(point) { return nil }
+            if let index = compactHoverIndex(at: point) { return index }
+            if let index = visualHoveredIndex, visibleNotes.indices.contains(index), cardPath(at: index).contains(point) { return index }
+            return nil
+        }
         let atEdge = edge == .left ? point.x <= Self.tabWidth : point.x >= bounds.width - Self.tabWidth
-        if atEdge && !compactMode {
+        if atEdge {
             for index in visibleNotes.indices {
                 let frame = cardFrame(at: index)
                 if point.y <= frame.maxY && point.y > frame.maxY - Self.cardOverlap { return index }

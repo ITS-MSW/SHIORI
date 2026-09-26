@@ -161,6 +161,8 @@ enum Theme {
         static let deckOpen = 0.28
         static let deckClose = 0.24
         static let hover = 0.12
+        static let compactHoverEnter = 0.10
+        static let compactHoverExit = 0.16
         static let deckStagger = 0.03
         static func deckProgress(_ progress: CGFloat, index: Int, count: Int) -> CGFloat {
             let span = deckOpen - Double(max(0, count - 1)) * deckStagger

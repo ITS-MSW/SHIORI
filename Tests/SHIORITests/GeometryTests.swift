@@ -72,6 +72,19 @@ final class GeometryTests: XCTestCase {
         }
     }
 
+    func testCompactHoverTracksRestingCardsAcrossBothEdges() {
+        for left in [false, true] {
+            let frame = NSRect(x: left ? -72 : 148, y: 162, width: 224, height: 76)
+            for index in [0, 3, 1, 5, 2] {
+                let titlePoint = NSPoint(x: left ? frame.maxX - 16 : frame.minX + 16, y: frame.maxY - 8)
+                let point = CompactFanGeometry.transform(rect: frame, index: index, count: 6, left: left, progress: 1).transform(titlePoint)
+                XCTAssertEqual(CompactFanGeometry.hoverIndex(at: point, frame: frame, count: 6, left: left, progress: 1), index)
+            }
+            XCTAssertNil(CompactFanGeometry.hoverIndex(at: NSPoint(x: 150, y: 0), frame: frame, count: 6, left: left, progress: 1))
+            XCTAssertNil(CompactFanGeometry.hoverIndex(at: .zero, frame: frame, count: 0, left: left, progress: 1))
+        }
+    }
+
     func testClampsDisconnectedAndNegativeDisplays() {
         let screens = [NSRect(x: -1440, y: -100, width: 1440, height: 900), NSRect(x: 0, y: 0, width: 1920, height: 1080)]
         let left = WindowGeometry.clamp(NSRect(x: -1500, y: -200, width: 360, height: 400), to: screens)
