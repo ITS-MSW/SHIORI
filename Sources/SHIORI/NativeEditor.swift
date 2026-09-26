@@ -224,7 +224,7 @@ public final class ChecklistTextView: NSTextView, @preconcurrency NSLayoutManage
         super.draw(dirtyRect)
         NSGraphicsContext.restoreGraphicsState()
         drawCheckboxes(in: dirtyRect)
-        drawBullets()
+        drawBullets(in: dirtyRect)
     }
 
     override public func didChangeText() {
@@ -335,10 +335,13 @@ public final class ChecklistTextView: NSTextView, @preconcurrency NSLayoutManage
         needsDisplay = true
     }
 
-    private func drawBullets() {
-        guard let layoutManager, !string.isEmpty else { return }
+    private func drawBullets(in dirtyRect: NSRect) {
+        guard let layoutManager, let textContainer, !string.isEmpty else { return }
+        let origin = textContainerOrigin
+        let visibleGlyphs = layoutManager.glyphRange(forBoundingRect: visibleRect.intersection(dirtyRect).offsetBy(dx: -origin.x, dy: -origin.y), in: textContainer)
+        let visibleCharacters = layoutManager.characterRange(forGlyphRange: visibleGlyphs, actualGlyphRange: nil)
         NSColor.black.withAlphaComponent(0.7).setFill()
-        for item in listItems where !item.isChecklist {
+        for item in listItems where !item.isChecklist && NSLocationInRange(item.markerRange.location, visibleCharacters) {
             let glyph = layoutManager.glyphIndexForCharacter(at: min(item.contentRange.location, string.utf16.count - 1))
             let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
             let x = textContainerOrigin.x + line.minX + (item.indentation as NSString).size(withAttributes: [.font: bodyFont]).width
