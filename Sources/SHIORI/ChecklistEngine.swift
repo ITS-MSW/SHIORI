@@ -278,9 +278,8 @@ public enum ChecklistEngine {
             starts.append(index + 1)
         }
 
-        return starts.compactMap { start in
-            guard start <= units.count else { return nil }
-            let fullEnd = starts.first(where: { $0 > start }) ?? units.count
+        return starts.enumerated().map { index, start in
+            let fullEnd = index + 1 < starts.count ? starts[index + 1] : units.count
             var bodyEnd = fullEnd
             if bodyEnd > start, units[bodyEnd - 1] == 0x0A {
                 bodyEnd -= 1
