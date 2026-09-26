@@ -3,6 +3,31 @@ import AppKit
 @testable import SHIORI
 
 final class DockTests: XCTestCase {
+    @MainActor
+    func testWindowSamplesReportOnlyGeometryIdentityOrVisibilityChanges() throws {
+        let context = AppAttachmentContext()
+        guard let app = context.runningApps.first(where: { !$0.isHidden }) else {
+            throw XCTSkip("Requires a foreground application to identify the sampled window owner.")
+        }
+        var info: [String: Any] = [
+            kCGWindowOwnerPID as String: app.processIdentifier,
+            kCGWindowNumber as String: CGWindowID(123),
+            kCGWindowLayer as String: 0,
+            kCGWindowBounds as String: ["X": 100, "Y": 100, "Width": 400, "Height": 300]
+        ]
+        context.windowInfo = { [info] }
+        context.record(app)
+        XCTAssertFalse(context.refreshWindowVisibility())
+        info[kCGWindowBounds as String] = ["X": 120, "Y": 100, "Width": 400, "Height": 300]
+        XCTAssertTrue(context.refreshWindowVisibility())
+        XCTAssertFalse(context.refreshWindowVisibility())
+        info[kCGWindowNumber as String] = CGWindowID(124)
+        XCTAssertTrue(context.refreshWindowVisibility())
+        XCTAssertTrue(context.refreshWindowVisibility(using: []))
+        XCTAssertFalse(context.refreshWindowVisibility(using: []))
+        XCTAssertTrue(context.refreshWindowVisibility())
+    }
+
     func testHoverStateTransitionsCancelStaleOpenAndClose() {
         var state = DockStateMachine()
         XCTAssertEqual(state.phase, .collapsed)

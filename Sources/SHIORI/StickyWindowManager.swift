@@ -63,11 +63,13 @@ final class AppAttachmentContext: NSObject, ObservableObject {
         }
     }
 
-    func refreshWindowVisibility(using info: [[String: Any]]? = nil) {
+    @discardableResult
+    func refreshWindowVisibility(using info: [[String: Any]]? = nil) -> Bool {
+        let oldFrame = windowFrame, oldID = windowID
         windowID = nil
         guard let app = currentApplication, !app.isTerminated, !app.isHidden else {
             windowFrame = nil
-            return
+            return oldFrame != nil || oldID != nil
         }
         windowFrame = nil
         for window in info ?? windowInfo() {
@@ -84,6 +86,7 @@ final class AppAttachmentContext: NSObject, ObservableObject {
                                  width: rect.width, height: rect.height)
             break
         }
+        return oldFrame != windowFrame || oldID != windowID
     }
 
     func startTracking() {
@@ -576,12 +579,13 @@ final class StickyWindowManager: NSObject, NSWindowDelegate {
         focus.noteID = nil
         refreshVisibility()
     }
-    func refreshVisibility(resample: Bool = true) {
+    func refreshVisibility(resample: Bool = true, onlyIfWindowChanged: Bool = false) {
         if let id = focus.noteID, !store.active.contains(where: { $0.id == id }) { focus.noteID = nil }
-        if resample { appAttachment.refreshWindowVisibility() }
+        let windowChanged = resample && appAttachment.refreshWindowVisibility()
         appAttachment.setTrackingEnabled(store.active.contains {
             $0.attachedAppBundleIdentifier != nil && $0.attachedAppBundleIdentifier == appAttachment.currentBundleIdentifier
         })
+        guard !onlyIfWindowChanged || windowChanged else { return }
         for note in store.active where note.pinned && matchesApp(note) && !hidden && windows[note.id] == nil {
             show(note.id, near: nil, focusTitle: false, activate: false)
         }

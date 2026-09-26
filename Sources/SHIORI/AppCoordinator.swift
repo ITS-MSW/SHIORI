@@ -108,7 +108,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate, NSMenuDelegate {
             appAttachment.setTrackingEnabled(false)
             return
         }
-        windows.refreshVisibility()
+        windows.refreshVisibility(onlyIfWindowChanged: true)
     }
     func removeLifecycleObservers() {
         appVisibilitySubscription = nil
