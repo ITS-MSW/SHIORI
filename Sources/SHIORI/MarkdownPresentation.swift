@@ -6,6 +6,7 @@ struct MarkdownPresentation {
     let text: NSAttributedString
     let hidden: IndexSet
     let listItems: [ChecklistEngine.ListItem]
+    let tasks: [ChecklistEngine.Task]
 
     static func preview(_ source: String, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
         let parsed = try? AttributedString(markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
@@ -27,7 +28,8 @@ struct MarkdownPresentation {
         let sourceMap = SourceMap(source)
         var hidden = IndexSet()
         let items = ChecklistEngine.listItems(in: source)
-        let tasks = ChecklistEngine.tasks(in: source)
+        let tasks = items.compactMap(\.task)
+        self.tasks = tasks
         let baseFont = baseAttributes[.font] as? NSFont ?? Theme.bodyFont
         if let parsed = try? AttributedString(markdown: source, options: .init(appliesSourcePositionAttributes: true)) {
             hidden = IndexSet(integersIn: 0..<nsSource.length)

@@ -224,7 +224,7 @@ public final class ChecklistTextView: NSTextView, @preconcurrency NSLayoutManage
         super.draw(dirtyRect)
         NSGraphicsContext.restoreGraphicsState()
         drawCheckboxes(in: dirtyRect)
-        drawBullets(in: dirtyRect)
+        drawBullets()
     }
 
     override public func didChangeText() {
@@ -317,10 +317,10 @@ public final class ChecklistTextView: NSTextView, @preconcurrency NSLayoutManage
         guard !applyingPresentation, !hasMarkedText(), let layoutManager, let textStorage else { return }
         applyingPresentation = true
         defer { applyingPresentation = false }
-        cachedTasks = ChecklistEngine.tasks(in: string)
         let paragraph = defaultParagraphStyle ?? NSParagraphStyle.default
         let base: [NSAttributedString.Key: Any] = [.font: bodyFont, .foregroundColor: NSColor.black.withAlphaComponent(0.84), .paragraphStyle: paragraph]
         let presentation = MarkdownPresentation(source: string, baseAttributes: base)
+        cachedTasks = presentation.tasks
         hiddenSyntax = presentation.hidden
         listItems = presentation.listItems
         let all = NSRange(location: 0, length: textStorage.length)
@@ -335,10 +335,10 @@ public final class ChecklistTextView: NSTextView, @preconcurrency NSLayoutManage
         needsDisplay = true
     }
 
-    private func drawBullets(in dirtyRect: NSRect) {
+    private func drawBullets() {
         guard let layoutManager, let textContainer, !string.isEmpty else { return }
         let origin = textContainerOrigin
-        let visibleGlyphs = layoutManager.glyphRange(forBoundingRect: visibleRect.intersection(dirtyRect).offsetBy(dx: -origin.x, dy: -origin.y), in: textContainer)
+        let visibleGlyphs = layoutManager.glyphRange(forBoundingRect: visibleRect.offsetBy(dx: -origin.x, dy: -origin.y), in: textContainer)
         let visibleCharacters = layoutManager.characterRange(forGlyphRange: visibleGlyphs, actualGlyphRange: nil)
         NSColor.black.withAlphaComponent(0.7).setFill()
         for item in listItems where !item.isChecklist && NSLocationInRange(item.markerRange.location, visibleCharacters) {

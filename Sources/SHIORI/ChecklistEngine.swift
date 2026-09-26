@@ -83,7 +83,8 @@ public enum ChecklistEngine {
         let indentation: String
         let marker: String
         let nextPrefix: String
-        let isChecklist: Bool
+        let task: Task?
+        var isChecklist: Bool { task != nil }
     }
 
     private static let listPattern = try! NSRegularExpression(pattern: #"^([ \t]*)([-*+]|[0-9]{1,9}[.)])[ \t]+(.*)$"#)
@@ -92,7 +93,7 @@ public enum ChecklistEngine {
         activeLines(in: text).compactMap { line in
             if let task = parseTask(in: line) {
                 return ListItem(lineRange: task.lineRange, markerRange: task.markerRange, contentRange: task.contentRange,
-                    indentation: task.indentation, marker: String(task.bullet), nextPrefix: "\(task.indentation)\(task.bullet) [ ] ", isChecklist: true)
+                    indentation: task.indentation, marker: String(task.bullet), nextPrefix: "\(task.indentation)\(task.bullet) [ ] ", task: task)
             }
             let source = line.text as NSString
             guard let match = listPattern.firstMatch(in: line.text, range: NSRange(location: 0, length: source.length)) else { return nil }
@@ -104,7 +105,7 @@ public enum ChecklistEngine {
             return ListItem(lineRange: line.bodyRange,
                 markerRange: NSRange(location: line.bodyRange.location + markerRange.location, length: markerRange.length),
                 contentRange: NSRange(location: line.bodyRange.location + contentRange.location, length: contentRange.length),
-                indentation: indentation, marker: marker, nextPrefix: indentation + nextMarker + " ", isChecklist: false)
+                indentation: indentation, marker: marker, nextPrefix: indentation + nextMarker + " ", task: nil)
         }
     }
 
