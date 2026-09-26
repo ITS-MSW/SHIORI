@@ -396,12 +396,12 @@ final class StickyWindowManager: NSObject, NSWindowDelegate {
         refreshVisibility()
     }
     func close(_ id: String) {
+        guard store.note(id: id)?.pinned != true else { return }
         if let privacy, privacy.isLocked { privacy.perform { [weak self] in self?.close(id) }; return }
         Task {
             await transitions[id]?.value
             do {
                 try await store.flush(id)
-                try await store.setPinned(id, pinned: false)
                 if settings.detachedGroup(for: id)?.noteIDs.count == 1 { placeDetachedAtEdge(id) }
                 await dismiss(id)
             } catch { reportError(error) }
@@ -443,7 +443,8 @@ final class StickyWindowManager: NSObject, NSWindowDelegate {
     private func dismiss(_ id: String, returningToEdge: Bool = true) async {
         if closing.contains(id) { await transitions[id]?.value; return }
         await transitions[id]?.value
-        guard let window = windows[id] else { return }
+        guard !returningToEdge || store.note(id: id)?.pinned != true,
+              let window = windows[id] else { return }
         saveGeometry(id)
         geometryTasks.removeValue(forKey: id)?.cancel()
         closing.insert(id)
