@@ -6,6 +6,35 @@ enum MarkdownFormat: String, CaseIterable {
 }
 
 enum MarkdownFormattingEngine {
+    private static let linkPattern = try! NSRegularExpression(pattern: #"\[((?:\\.|[^\]\\\n])*)\]\(([^)\n]*)\)"#)
+
+    static func pastedLinkEdit(_ pasted: String, text: String, selection: NSRange) -> ChecklistEngine.TextEdit? {
+        let destination = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard selection.length > 0, let range = Range(selection, in: text),
+              (range.lowerBound == text.endIndex || text.indices.contains(range.lowerBound)),
+              (range.upperBound == text.endIndex || text.indices.contains(range.upperBound)),
+              !destination.contains(where: { $0.isWhitespace }),
+              let url = URLComponents(string: destination),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              let host = url.host, !host.isEmpty, let absolute = url.url?.absoluteString else { return nil }
+        let source = text as NSString
+        let selected = source.substring(with: selection)
+        guard !selected.contains(where: { $0.isNewline }) else { return nil }
+        let escapedURL = absolute.replacingOccurrences(of: "(", with: "%28").replacingOccurrences(of: ")", with: "%29")
+        if let match = linkPattern.matches(in: text, range: NSRange(location: 0, length: source.length)).first(where: {
+            selection == $0.range(at: 1) || selection == $0.range
+        }) {
+            let replacement = "[\(source.substring(with: match.range(at: 1)))](\(escapedURL))"
+            return .init(range: match.range, replacement: replacement,
+                         selectionAfter: NSRange(location: match.range.location + replacement.utf16.count, length: 0))
+        }
+        let label = selected.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
+        let replacement = "[\(label)](\(escapedURL))"
+        return .init(range: selection, replacement: replacement,
+                     selectionAfter: NSRange(location: selection.location + replacement.utf16.count, length: 0))
+    }
+
     static func edit(_ format: MarkdownFormat, text: String, selection: NSRange) -> ChecklistEngine.TextEdit? {
         guard let range = Range(selection, in: text),
               (range.lowerBound == text.endIndex || text.indices.contains(range.lowerBound)),
@@ -27,8 +56,7 @@ enum MarkdownFormattingEngine {
             }
             return .init(range: selection, replacement: marker + selected + marker, selectionAfter: NSRange(location: selection.location + count, length: selection.length))
         case .link:
-            let regex = try! NSRegularExpression(pattern: #"\[([^\]\n]*)\]\(([^)\n]*)\)"#)
-            if let match = regex.matches(in: text, range: NSRange(location: 0, length: source.length)).first(where: {
+            if let match = linkPattern.matches(in: text, range: NSRange(location: 0, length: source.length)).first(where: {
                 selection.location >= $0.range.location && NSMaxRange(selection) <= NSMaxRange($0.range)
             }) {
                 return .init(range: match.range, replacement: source.substring(with: match.range), selectionAfter: match.range(at: 2))

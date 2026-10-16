@@ -9,13 +9,18 @@ import ServiceManagement
 final class MilestoneTests: XCTestCase {
     private func database() async throws -> (URL, NoteRepository) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        return (root, try await NoteRepository.open(at: root.appendingPathComponent("notes.sqlite")))
+        let repository = try await NoteRepository.open(at: root.appendingPathComponent("notes.sqlite"))
+        addTeardownBlock {
+            try repository.close()
+            try FileManager.default.removeItem(at: root)
+        }
+        return (root, repository)
     }
 
     func testSearchUsesLiveDraftsAndExcludesInactiveNotes() async throws {
-        let (root, repository) = try await database()
-        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, repository) = try await database()
         let store = NotesStore(repository: repository, debounce: .seconds(60))
+        addTeardownBlock { try await store.drain() }
         let note = try await store.create()
         store.edit(note.id, title: "Une idée", body: "Bonjour مرحباً 😀")
         for query in ["IDEE", "bonjour", "مرح", "😀"] { XCTAssertEqual(store.search(query).map(\.id), [note.id]) }
@@ -30,9 +35,9 @@ final class MilestoneTests: XCTestCase {
     }
 
     func testDeleteFlushUndoAndReopenPreserveEntireRecord() async throws {
-        let (root, repository) = try await database()
-        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, repository) = try await database()
         let store = NotesStore(repository: repository, debounce: .seconds(60))
+        addTeardownBlock { try await store.drain() }
         let note = try await store.create()
         try await store.setPinned(note.id, pinned: true)
         store.edit(note.id, title: "Idée", body: "- [ ] مرحباً 😀", colorIndex: 4)
@@ -40,9 +45,11 @@ final class MilestoneTests: XCTestCase {
         try await store.delete(note.id)
         XCTAssertTrue(store.active.isEmpty)
         let reopened = try await NoteRepository.open(at: repository.databaseURL)
+        addTeardownBlock { try reopened.close() }
         let active = try await reopened.loadActiveNotes()
         XCTAssertTrue(active.isEmpty)
         let queue = try DatabaseQueue(path: repository.databaseURL.path)
+        addTeardownBlock { try queue.close() }
         let deleted = try await queue.read { try Note.fetchOne($0, key: note.id) }
         XCTAssertNotNil(deleted?.deletedAt)
         XCTAssertEqual(deleted?.body, original.body)
@@ -96,9 +103,10 @@ final class MilestoneTests: XCTestCase {
     }
 
     func testFailedFlushPreventsDeletion() async throws {
-        let (root, repository) = try await database()
-        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, repository) = try await database()
         let store = NotesStore(repository: repository, debounce: .seconds(60), writeOverride: { _, _, _ in throw CocoaError(.fileWriteUnknown) })
+        // This test deliberately keeps an unsavable draft; drain cancels its timer before failing.
+        addTeardownBlock { _ = try? await store.drain() }
         let note = try await store.create()
         store.edit(note.id, body: "Unsaved")
         do { try await store.delete(note.id); XCTFail("Expected failed flush") } catch {}
@@ -198,13 +206,13 @@ final class MilestoneTests: XCTestCase {
 
     func testFloatingVisibilityPreservesPinAndGeometry() async throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["SHIORI_RUN_WINDOW_TESTS"] == "1", "Desktop-interactive test; opt in with SHIORI_RUN_WINDOW_TESTS=1.")
-        let (root, repository) = try await database()
-        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, repository) = try await database()
         let suite = "tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsStore(defaults: defaults)
         let store = NotesStore(repository: repository)
+        addTeardownBlock { try await store.drain() }
         let note = try await store.create()
         try await store.setPinned(note.id, pinned: true)
         let manager = StickyWindowManager(store: store, settings: settings) { _ in XCTFail("Unexpected window error") }
@@ -233,13 +241,13 @@ final class MilestoneTests: XCTestCase {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["SHIORI_RUN_WINDOW_TESTS"] == "1", "Desktop-interactive test; opt in with SHIORI_RUN_WINDOW_TESTS=1.")
         let screens = NSScreen.screens
         guard screens.count >= 2 else { throw XCTSkip("Requires two connected displays") }
-        let (root, repository) = try await database()
-        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, repository) = try await database()
         let suite = "tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = SettingsStore(defaults: defaults)
         let store = NotesStore(repository: repository)
+        addTeardownBlock { try await store.drain() }
         let note = try await store.create()
         try await store.setPinned(note.id, pinned: true)
         let manager = StickyWindowManager(store: store, settings: settings) { _ in XCTFail("Unexpected error") }

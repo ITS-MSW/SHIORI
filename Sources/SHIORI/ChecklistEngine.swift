@@ -11,9 +11,9 @@ public enum ChecklistEngine {
         public let lineRange: NSRange
         /// The complete line, including its line ending when one exists.
         public let fullLineRange: NSRange
-        /// The five-character marker, for example `- [ ]`.
+        /// The task marker, for example `- [ ]` or `- []`.
         public let markerRange: NSRange
-        /// The single state character between the brackets.
+        /// The state character, or its insertion point for empty brackets.
         public let stateRange: NSRange
         /// The range containing the task's visible text.
         public let contentRange: NSRange
@@ -202,11 +202,11 @@ public enum ChecklistEngine {
         let unfinished = tasks(in: text).filter { !$0.isChecked }
         guard !unfinished.isEmpty else { return text }
 
-        var units = Array(text.utf16)
-        for task in unfinished where task.stateRange.location < units.count {
-            units[task.stateRange.location] = 0x78 // x
+        let result = NSMutableString(string: text)
+        for task in unfinished.reversed() {
+            result.replaceCharacters(in: task.stateRange, with: "x")
         }
-        return String(decoding: units, as: UTF16.self)
+        return result as String
     }
 
     // MARK: - Parsing
@@ -218,17 +218,19 @@ public enum ChecklistEngine {
             offset += 1
         }
 
-        guard offset + 4 < units.count,
+        guard offset + 3 < units.count,
               units[offset] == 0x2D || units[offset] == 0x2A || units[offset] == 0x2B,
               units[offset + 1] == 0x20,
-              units[offset + 2] == 0x5B,
-              units[offset + 4] == 0x5D
+              units[offset + 2] == 0x5B
         else { return nil }
 
+        let emptyBrackets = units[offset + 3] == 0x5D
         let stateUnit = units[offset + 3]
-        guard stateUnit == 0x20 || stateUnit == 0x78 || stateUnit == 0x58 else { return nil }
+        guard emptyBrackets || (offset + 4 < units.count && units[offset + 4] == 0x5D &&
+              (stateUnit == 0x20 || stateUnit == 0x78 || stateUnit == 0x58)) else { return nil }
 
-        var contentOffset = offset + 5
+        let markerLength = emptyBrackets ? 4 : 5
+        var contentOffset = offset + markerLength
         while contentOffset < units.count,
               units[contentOffset] == 0x20 || units[contentOffset] == 0x09 {
             contentOffset += 1
@@ -242,8 +244,8 @@ public enum ChecklistEngine {
         return Task(
             lineRange: line.bodyRange,
             fullLineRange: line.fullRange,
-            markerRange: NSRange(location: markerLocation, length: 5),
-            stateRange: NSRange(location: markerLocation + 3, length: 1),
+            markerRange: NSRange(location: markerLocation, length: markerLength),
+            stateRange: NSRange(location: markerLocation + 3, length: emptyBrackets ? 0 : 1),
             contentRange: NSRange(location: contentLocation, length: units.count - contentOffset),
             indentation: indentation,
             bullet: Character(UnicodeScalar(units[offset])!),

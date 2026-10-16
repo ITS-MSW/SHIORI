@@ -27,16 +27,24 @@ private actor WriteProbe {
 final class AutosaveTests: XCTestCase {
     private func database() async throws -> (URL, NoteRepository) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("shiori-autosave-\(UUID().uuidString)")
-        return (root, try await NoteRepository.open(at: root.appendingPathComponent("notes.sqlite")))
+        let repository = try await NoteRepository.open(at: root.appendingPathComponent("notes.sqlite"))
+        addTeardownBlock {
+            try repository.close()
+            try FileManager.default.removeItem(at: root)
+        }
+        return (root, repository)
     }
     func testCoalescingAndMaximumInterval() async throws {
-        let (root, repository) = try await database()
-        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, repository) = try await database()
         let probe = WriteProbe()
         let store = NotesStore(repository: repository, debounce: .seconds(60), maxInterval: .milliseconds(40), writeOverride: { note, _, _ in
             await probe.record(note.body)
             try await repository.updateText(id: note.id, title: note.title, body: note.body)
         })
+        addTeardownBlock {
+            await probe.release()
+            try await store.drain()
+        }
         let note = try await store.create()
         store.edit(note.id, body: "one")
         store.edit(note.id, body: "two")
@@ -48,14 +56,17 @@ final class AutosaveTests: XCTestCase {
         XCTAssertNil(store.drafts[note.id])
     }
     func testOlderSaveCannotClearNewerTextOrColorAndConcurrentFlushWaits() async throws {
-        let (root, repository) = try await database()
-        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, repository) = try await database()
         let probe = WriteProbe(gateFirst: true)
         let store = NotesStore(repository: repository, debounce: .seconds(60), writeOverride: { note, text, color in
             await probe.record(note.body)
             if text { try await repository.updateText(id: note.id, title: note.title, body: note.body) }
             if color { try await repository.updateColor(id: note.id, colorIndex: note.colorIndex) }
         })
+        addTeardownBlock {
+            await probe.release()
+            try await store.drain()
+        }
         let note = try await store.create()
         store.edit(note.id, body: "old")
         let firstFlush = Task { try await store.flush(note.id) }
@@ -73,14 +84,17 @@ final class AutosaveTests: XCTestCase {
         XCTAssertEqual(store.saveStatus(note.id), "Saved")
     }
     func testCompleteWaitsForTextThenAtomicallyArchivesAndRestoreKeepsMarkers() async throws {
-        let (root, repository) = try await database()
-        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, repository) = try await database()
         let probe = WriteProbe(gateFirst: true)
         let store = NotesStore(repository: repository, debounce: .seconds(60), writeOverride: { note, text, color in
             await probe.record(note.body)
             if text { try await repository.updateText(id: note.id, title: note.title, body: note.body) }
             if color { try await repository.updateColor(id: note.id, colorIndex: note.colorIndex) }
         })
+        addTeardownBlock {
+            await probe.release()
+            try await store.drain()
+        }
         let note = try await store.create()
         try await store.setPinned(note.id, pinned: true)
         store.edit(note.id, body: "- [ ] old")
@@ -114,13 +128,15 @@ final class AutosaveTests: XCTestCase {
         XCTAssertNil(store.active.first?.archivedAt)
     }
     func testFailedDraftCanRetryWithoutLosingContent() async throws {
-        let (root, repository) = try await database()
-        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, repository) = try await database()
         let attempts = RetryGate()
         let store = NotesStore(repository: repository, debounce: .seconds(60), writeOverride: { note, _, _ in
             try await attempts.check()
             try await repository.updateText(id: note.id, title: note.title, body: note.body)
         })
+        addTeardownBlock {
+            try await store.drain()
+        }
         let note = try await store.create()
         store.edit(note.id, body: "Still here")
         do { try await store.flush(); XCTFail("Expected failure") } catch {}
@@ -134,9 +150,9 @@ final class AutosaveTests: XCTestCase {
     }
     func testHundredNotesAndLongUnicodeDraftRemainReachableAfterReopen() async throws {
         let (root, repository) = try await database()
-        defer { try? FileManager.default.removeItem(at: root) }
         for index in 0..<100 { _ = try await repository.create(note: Note(title: "Note \(index)", pinned: index < 4)) }
         let store = NotesStore(repository: repository, debounce: .seconds(60))
+        addTeardownBlock { try await store.drain() }
         try await store.load()
         let first = try XCTUnwrap(store.active.first)
         let body = String(repeating: "English · Français café · العربية 😀\n", count: 1500)
@@ -145,6 +161,7 @@ final class AutosaveTests: XCTestCase {
         let order = store.active.map(\.id).reversed()
         try await store.reorder(ids: Array(order))
         let reopened = try await NoteRepository.open(at: root.appendingPathComponent("notes.sqlite"))
+        addTeardownBlock { try reopened.close() }
         let saved = try await reopened.loadActiveNotes()
         XCTAssertEqual(saved.count, 100)
         XCTAssertEqual(saved.map(\.id), Array(order))

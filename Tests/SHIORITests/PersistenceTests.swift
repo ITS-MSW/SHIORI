@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import XCTest
+import GRDB
 @testable import SHIORI
 
 final class PersistenceTests: XCTestCase {
@@ -197,7 +198,18 @@ final class PersistenceTests: XCTestCase {
         let repository = try await NoteRepository.open(at: databaseURL)
         let backupDirectory = databaseURL.deletingLastPathComponent().appendingPathComponent("Backups")
         for _ in 0..<8 {
-            _ = try await repository.backup(in: backupDirectory)
+            let snapshot = try await repository.backup(in: backupDirectory)
+            var configuration = Configuration()
+            configuration.readonly = true
+            let verification = try DatabaseQueue(path: snapshot.path, configuration: configuration)
+            do {
+                let integrity = try await verification.read { try String.fetchOne($0, sql: "PRAGMA integrity_check") }
+                XCTAssertEqual(integrity, "ok")
+                try verification.close()
+            } catch {
+                try? verification.close()
+                throw error
+            }
         }
         let snapshots = try FileManager.default.contentsOfDirectory(
             at: backupDirectory,
@@ -205,6 +217,8 @@ final class PersistenceTests: XCTestCase {
             options: [.skipsHiddenFiles]
         ).filter { $0.pathExtension == "sqlite" && $0.lastPathComponent.hasPrefix("notes-") }
         XCTAssertEqual(snapshots.count, 7)
+        let allFiles = try FileManager.default.contentsOfDirectory(atPath: backupDirectory.path)
+        XCTAssertEqual(Set(allFiles), Set(snapshots.map(\.lastPathComponent)), "Backups must not leave temporary databases or SQLite sidecars")
     }
 
     func testSaveFailureRetainsDirtyDraft() async throws {

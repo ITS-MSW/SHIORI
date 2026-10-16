@@ -7,6 +7,7 @@ struct MarkdownPresentation {
     let hidden: IndexSet
     let listItems: [ChecklistEngine.ListItem]
     let tasks: [ChecklistEngine.Task]
+    private static let labelEscapes = try! NSRegularExpression(pattern: #"\\([\\\[\]])"#)
 
     static func preview(_ source: String, attributes: [NSAttributedString.Key: Any]) -> NSAttributedString {
         let parsed = try? AttributedString(markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
@@ -40,11 +41,23 @@ struct MarkdownPresentation {
                 if run.markdownSourcePosition == nil,
                    parsed[run.range].characters.allSatisfy({ $0.isWhitespace }) { continue }
                 var sourceRange = run.markdownSourcePosition.flatMap { sourceMap.range($0) }
+                var escapedSyntax = IndexSet()
                 if run.link != nil, sourceRange.map({ nsSource.substring(with: $0) != content }) ?? true {
-                    // Foundation autolinks can omit or misreport coordinates. Match in source order.
-                    let match = nsSource.range(of: content, options: .literal,
-                                               range: NSRange(location: sourceCursor, length: nsSource.length - sourceCursor))
-                    sourceRange = match.location == NSNotFound ? nil : match
+                    if let range = sourceRange {
+                        let label = nsSource.substring(with: range)
+                        let whole = NSRange(location: 0, length: label.utf16.count)
+                        if Self.labelEscapes.stringByReplacingMatches(in: label, range: whole, withTemplate: "$1") == content {
+                            for match in Self.labelEscapes.matches(in: label, range: whole) {
+                                escapedSyntax.insert(range.location + match.range.location)
+                            }
+                        }
+                    }
+                    if escapedSyntax.isEmpty {
+                        // Foundation autolinks can omit or misreport coordinates. Match in source order.
+                        let match = nsSource.range(of: content, options: .literal,
+                                                   range: NSRange(location: sourceCursor, length: nsSource.length - sourceCursor))
+                        sourceRange = match.location == NSNotFound ? nil : match
+                    }
                 }
                 guard let range = sourceRange else {
                     // Preserve source text if parser coordinates cannot be recovered.
@@ -55,6 +68,7 @@ struct MarkdownPresentation {
                 }
                 sourceCursor = min(NSMaxRange(range), range.location + content.utf16.count)
                 hidden.remove(integersIn: range.location..<NSMaxRange(range))
+                hidden.formUnion(escapedSyntax)
                 let inline = run.inlinePresentationIntent ?? []
                 var font = baseFont
                 for component in run.presentationIntent?.components ?? [] {
@@ -97,8 +111,9 @@ struct MarkdownPresentation {
             hidden.insert(integersIn: item.markerRange.location..<item.contentRange.location)
             hidden.remove(integersIn: item.lineRange.location..<item.markerRange.location)
             // An empty item still needs a laid-out space for its marker and insertion caret.
-            if item.contentRange.length == 0, item.contentRange.location > NSMaxRange(item.markerRange) {
-                hidden.remove(item.contentRange.location - 1)
+            if item.contentRange.length == 0 {
+                hidden.remove(item.contentRange.location > NSMaxRange(item.markerRange)
+                    ? item.contentRange.location - 1 : item.markerRange.location + 1)
             }
             let paragraph = (baseAttributes[.paragraphStyle] as? NSParagraphStyle ?? .default).mutableCopy() as! NSMutableParagraphStyle
             paragraph.headIndent = (item.indentation as NSString).size(withAttributes: [.font: baseFont]).width

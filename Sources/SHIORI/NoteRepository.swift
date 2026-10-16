@@ -78,6 +78,9 @@ public final class NoteRepository: @unchecked Sendable {
         try Self.migrate(queue)
     }
 
+    /// Close only after callers have drained all outstanding operations.
+    func close() throws { try queue.close() }
+
     /// Opens and migrates the database off the caller's actor.
     public static func open(at databaseURL: URL) async throws -> NoteRepository {
         try await Task.detached(priority: .userInitiated) {
@@ -338,18 +341,30 @@ public final class NoteRepository: @unchecked Sendable {
             let destinationURL = directory.appendingPathComponent("\(baseName).sqlite")
             defer { try? fileManager.removeItem(at: temporaryURL) }
 
+            let destination = try DatabaseQueue(path: temporaryURL.path)
             do {
-                let destination = try DatabaseQueue(path: temporaryURL.path)
                 try queue.backup(to: destination)
+                try destination.close()
+            } catch {
+                try? destination.close()
+                throw error
             }
 
             var readOnlyConfiguration = Configuration()
             readOnlyConfiguration.readonly = true
             let reopened = try DatabaseQueue(path: temporaryURL.path, configuration: readOnlyConfiguration)
-            let isValid = try reopened.read { db in
-                let integrity = try String.fetchOne(db, sql: "PRAGMA integrity_check")
-                let count = try Note.fetchCount(db)
-                return integrity == "ok" && count >= 0
+            let isValid: Bool
+            do {
+                isValid = try reopened.read { db in
+                    let integrity = try String.fetchOne(db, sql: "PRAGMA integrity_check")
+                    let count = try Note.fetchCount(db)
+                    return integrity == "ok" && count >= 0
+                }
+                // SQLite connections must be closed before moving their database file.
+                try reopened.close()
+            } catch {
+                try? reopened.close()
+                throw error
             }
             guard isValid else { throw NoteRepositoryError.invalidBackup }
             try fileManager.moveItem(at: temporaryURL, to: destinationURL)

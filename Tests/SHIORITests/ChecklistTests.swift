@@ -4,6 +4,67 @@ import AppKit
 
 final class ChecklistTests: XCTestCase {
     @MainActor
+    func testPastingURLLinksSelectedTextAndSupportsUndo() throws {
+        let editor = ChecklistTextView(frame: NSRect(x: 0, y: 0, width: 360, height: 240))
+        let window = NSWindow(contentRect: editor.frame, styleMask: .borderless, backing: .buffered, defer: true)
+        window.contentView = editor
+        editor.isRichText = false; editor.allowsUndo = true
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally(); window.orderOut(nil) }
+        let label = "Café 😀 مرحباً"
+        let source = "Visit " + label
+        let url = "https://example.com/path_(one)?q=test"
+        editor.string = source
+        editor.setSelectedRange((source as NSString).range(of: label))
+        pasteboard.setString(url, forType: .string)
+        XCTAssertTrue(editor.readSelection(from: pasteboard))
+        let linked = "Visit [\(label)](https://example.com/path_%28one%29?q=test)"
+        XCTAssertEqual(editor.string, linked)
+        let range = (linked as NSString).range(of: label)
+        XCTAssertEqual(editor.textStorage?.attribute(.link, at: range.location, effectiveRange: nil) as? URL,
+                       URL(string: "https://example.com/path_%28one%29?q=test"))
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: linked.utf16.count, length: 0))
+        editor.undoManager?.undo()
+        XCTAssertEqual(editor.string, source)
+        editor.undoManager?.redo()
+        XCTAssertEqual(editor.string, linked)
+        editor.setSelectedRange(range)
+        pasteboard.clearContents(); pasteboard.setString("https://example.org", forType: .string)
+        XCTAssertTrue(editor.readSelection(from: pasteboard))
+        XCTAssertEqual(editor.string, "Visit [\(label)](https://example.org)")
+        for label in ["Read [docs]", "**Café**", "Path \\ name"] {
+            editor.string = label
+            editor.setSelectedRange(NSRange(location: 0, length: label.utf16.count))
+            pasteboard.clearContents(); pasteboard.setString("https://example.com", forType: .URL)
+            XCTAssertTrue(editor.readSelection(from: pasteboard))
+            let presentation = MarkdownPresentation(source: editor.string, baseAttributes: [.font: Theme.bodyFont])
+            let visible = editor.string.utf16.enumerated().filter { !presentation.hidden.contains($0.offset) }.map(\.element)
+            XCTAssertEqual(String(decoding: visible, as: UTF16.self), label == "**Café**" ? "Café" : label)
+            XCTAssertNotNil(editor.textStorage?.attribute(.link, at: (editor.string as NSString).range(of: label.hasPrefix("**") ? "Café" : label.hasPrefix("Path") ? "Path" : "Read").location, effectiveRange: nil))
+        }
+    }
+
+    @MainActor
+    func testNonURLPasteKeepsNativeReplacementAndMarkedTextSafe() {
+        let editor = ChecklistTextView(frame: NSRect(x: 0, y: 0, width: 360, height: 240))
+        editor.isRichText = false
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        for text in ["ordinary text", "https://example.com extra", "https://", "https://example.com\nhttps://example.org"] {
+            editor.string = "Selected"
+            editor.setSelectedRange(NSRange(location: 0, length: 8))
+            pasteboard.clearContents(); pasteboard.setString(text, forType: .string)
+            XCTAssertTrue(editor.readSelection(from: pasteboard))
+            XCTAssertEqual(editor.string, text)
+        }
+        XCTAssertNil(MarkdownFormattingEngine.pastedLinkEdit("https://example.com", text: "😀", selection: NSRange(location: 1, length: 1)))
+        editor.setMarkedText("に", selectedRange: NSRange(location: 0, length: 1), replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+        pasteboard.clearContents(); pasteboard.setString("https://example.com", forType: .string)
+        XCTAssertTrue(editor.readSelection(from: pasteboard))
+        XCTAssertFalse(editor.string.hasPrefix("["))
+    }
+
+    @MainActor
     func testTicketPreviewRendersLinksAndPreservesCodeAndChecklists() {
         let source = "Make portfolio [ex](https://pro.beui.dev/)\n- [ ] Visit https://example.com\n`[literal](https://example.com)`"
         let preview = MarkdownPresentation.preview(source, attributes: [.font: Theme.bodyFont])
@@ -39,6 +100,14 @@ final class ChecklistTests: XCTestCase {
                     let glyph = layout.glyphIndexForCharacter(at: index)
                     XCTAssertFalse(layout.propertyForGlyph(at: glyph).contains(.null), prefix + url)
                 }
+                editor.insertNewline(nil)
+                editor.insertText("Next", replacementRange: editor.selectedRange())
+                XCTAssertEqual(editor.string, prefix + url + "\nNext")
+                layout.ensureLayout(for: editor.textContainer!)
+                let first = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: prefix.utf16.count), effectiveRange: nil)
+                let next = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: editor.string.utf16.count - 1), effectiveRange: nil)
+                XCTAssertGreaterThan(next.minY, first.minY)
+                XCTAssertNil(editor.textStorage?.attribute(.link, at: editor.string.utf16.count - 1, effectiveRange: nil))
             }
         }
     }
@@ -60,15 +129,20 @@ final class ChecklistTests: XCTestCase {
     }
 
     func testRecognizesUnicodeTasksAndSkipsFencedCode() {
-        let text = "- [ ] Café 😀\n```markdown\n- [ ] inside code\n```\n\t* [x] مرحباً"
+        let text = "- [] Café 😀\n```markdown\n- [] inside code\n```\n\t* [x] مرحباً"
 
         let tasks = ChecklistEngine.tasks(in: text)
 
         XCTAssertEqual(tasks.count, 2)
+        guard tasks.count == 2 else { return }
         XCTAssertEqual(tasks[0].content, "Café 😀")
         XCTAssertFalse(tasks[0].isChecked)
         XCTAssertEqual(tasks[1].content, "مرحباً")
         XCTAssertTrue(tasks[1].isChecked)
+        let task = ChecklistEngine.tasks(in: "- []").first
+        XCTAssertEqual(task?.markerRange.length, 4)
+        XCTAssertEqual(task.map { ChecklistEngine.toggleEdit(for: $0).applying(to: "- []") }, "- [x]")
+        XCTAssertEqual(ChecklistEngine.completeAll(text: "- [] One\n- [ ] Two"), "- [x] One\n- [x] Two")
     }
 
     func testToggleChangesOnlyTheSelectedMarkerAndPreservesText() throws {
@@ -168,6 +242,20 @@ final class ChecklistTests: XCTestCase {
             editor.insertNewline(nil)
             XCTAssertTrue(editor.string.contains(prefix + " \n"))
         }
+        for source in ["[Café 😀](https://example.com)", "https://example.com\nNext"] {
+            editor.string = source
+            editor.didChangeText()
+            let caret = source.hasPrefix("[") ? (source as NSString).range(of: "Café 😀").upperBound : source.utf16.count
+            editor.setSelectedRange(NSRange(location: caret, length: 0))
+            editor.insertNewline(nil)
+            editor.insertText("More", replacementRange: editor.selectedRange())
+            XCTAssertEqual(editor.string, source + "\nMore")
+            let layout = try XCTUnwrap(editor.layoutManager)
+            layout.ensureLayout(for: editor.textContainer!)
+            let first = layout.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
+            let last = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: editor.string.utf16.count - 1), effectiveRange: nil)
+            XCTAssertGreaterThan(last.minY, first.minY)
+        }
     }
 
     @MainActor
@@ -196,11 +284,12 @@ final class ChecklistTests: XCTestCase {
         window.contentView = editor
         editor.isRichText = false; editor.allowsUndo = true
         defer { window.orderOut(nil) }
-        for (prefix, next) in [("- ", "- "), ("* ", "* "), ("1. ", "2. "), ("- [ ] ", "- [ ] "), ("- [x] ", "- [ ] ")] {
+        for (prefix, next) in [("- ", "- "), ("* ", "* "), ("1. ", "2. "), ("- []", "- [ ] "), ("- [ ] ", "- [ ] "), ("- [x] ", "- [ ] ")] {
             editor.string = ""
             editor.setSelectedRange(NSRange(location: 0, length: 0))
             editor.insertText(prefix, replacementRange: editor.selectedRange())
             XCTAssertEqual(editor.string, prefix)
+            if prefix == "- []" { XCTAssertEqual(editor.accessibilityChildren()?.count, 1) }
             editor.insertText("Café 😀", replacementRange: editor.selectedRange())
             let original = editor.string
             editor.breakUndoCoalescing(); editor.undoManager?.removeAllActions()

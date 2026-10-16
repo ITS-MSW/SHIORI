@@ -264,13 +264,41 @@ public final class ChecklistTextView: NSTextView, @preconcurrency NSLayoutManage
     }
 
     override public func insertNewline(_ sender: Any?) {
-        guard !hasMarkedText(),
-              let edit = ChecklistEngine.returnEdit(in: string, selection: selectedRange())
-        else {
+        guard !hasMarkedText() else {
             super.insertNewline(sender)
             return
         }
+        var selection = selectedRange()
+        // A caret at the visible end of a link can precede its hidden destination.
+        if selection.length == 0, selection.location > 0,
+           textStorage?.attribute(.link, at: selection.location - 1, effectiveRange: nil) != nil {
+            while hiddenSyntax.contains(selection.location) { selection.location += 1 }
+        }
+        let edit = ChecklistEngine.returnEdit(in: string, selection: selection)
+            ?? .init(range: selection, replacement: "\n", selectionAfter: NSRange(location: selection.location + 1, length: 0))
         apply(edit)
+    }
+
+    override public func readSelection(from pasteboard: NSPasteboard) -> Bool {
+        pasteSelectedLink(from: pasteboard, type: .string)
+            ?? pasteSelectedLink(from: pasteboard, type: .URL)
+            ?? super.readSelection(from: pasteboard)
+    }
+
+    override public func readSelection(from pasteboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        pasteSelectedLink(from: pasteboard, type: type) ?? super.readSelection(from: pasteboard, type: type)
+    }
+
+    private func pasteSelectedLink(from pasteboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool? {
+        guard isEditable, !hasMarkedText(), type == .string || type == .URL,
+              let pasted = pasteboard.string(forType: type),
+              let edit = MarkdownFormattingEngine.pastedLinkEdit(pasted, text: string, selection: selectedRange())
+        else { return nil }
+        breakUndoCoalescing()
+        let applied = apply(edit)
+        breakUndoCoalescing()
+        if applied { scrollRangeToVisible(selectedRange()) }
+        return applied
     }
 
     override public func mouseDown(with event: NSEvent) {
@@ -299,14 +327,16 @@ public final class ChecklistTextView: NSTextView, @preconcurrency NSLayoutManage
         apply(edit)
     }
 
-    private func apply(_ edit: ChecklistEngine.TextEdit) {
-        guard isEditable, !hasMarkedText() else { return }
-        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
+    @discardableResult
+    private func apply(_ edit: ChecklistEngine.TextEdit) -> Bool {
+        guard isEditable, !hasMarkedText() else { return false }
+        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return false }
         textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         didChangeText()
         if let selectionAfter = edit.selectionAfter {
             setSelectedRange(selectionAfter)
         }
+        return true
     }
 
     fileprivate func applyAccessibilityEdit(_ edit: ChecklistEngine.TextEdit) {
