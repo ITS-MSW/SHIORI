@@ -1,12 +1,12 @@
 # SHIORI
 
-SHIORI is a free, open-source macOS menu-bar app for sticky notes that stay close to your work. Keep notes at the screen edge, hover to preview them, or open them as floating windows.
-
-![A SHIORI note with handwritten text and its editing controls](Resources/shiori-note-editor.png)
-
-![Hovering over SHIORI edge tabs reveals a note preview](Resources/shiori-hover-fan.png)
-
+SHIORI is a free, open-source macOS menu-bar app for sticky notes that stay close to your work. Keep notes at the screen edge, hover to preview them, or open them as floating windows. 
 Write in Markdown with clickable checklists, choose a note color and font, and find notes with Quick Search. Attach notes to an app so they follow its active window, or use Focus to keep one note in view.
+
+<p align="center">
+  <img src="Resources/shiori-note-editor.png" alt="SHIORI note editor" width="48%" />
+  <img src="Resources/shiori-hover-fan.png" alt="SHIORI hover preview" width="48%" />
+</p>
 
 ## Install
 
