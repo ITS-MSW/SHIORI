@@ -102,7 +102,7 @@ final class SettingsStore: ObservableObject {
         guard screen.height > 0, point.x.isFinite, point.y.isFinite else { return }
         let side = abs(point.x - screen.minX) < abs(point.x - screen.maxX) ? "left" : "right"
         let position = min(1, max(0, (point.y - screen.minY) / screen.height))
-        let target = detachedGroups.filter { $0.displayID == displayID && $0.edge == side && $0.noteIDs.contains(where: { $0 != id }) }
+        let target = detachedGroups.filter { $0.edge == side && $0.noteIDs.contains(where: { $0 != id }) }
             .min { abs($0.anchor - position) < abs($1.anchor - position) }
         removeFromDetachedGroup(id)
         if let target, abs(target.anchor - position) * screen.height < 120,
@@ -111,7 +111,7 @@ final class SettingsStore: ObservableObject {
         } else if allowMain, side == edge, abs(anchor - position) * screen.height < 80 {
             return
         } else {
-            let occupied = detachedGroups.filter { $0.displayID == displayID && $0.edge == side }.map(\.anchor)
+            let occupied = detachedGroups.filter { $0.edge == side }.map(\.anchor)
                 + (side == edge ? [anchor] : [])
             let step = 120 / screen.height
             var candidates: [Double] = [position]

@@ -27,7 +27,11 @@ final class AppCoordinator: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var windows: StickyWindowManager?
     var appTabs: EdgeDockController?
     var edgeTabs: [CGDirectDisplayID: EdgeDockController] = [:]
-    var detachedTabs: [String: EdgeDockController] = [:]
+    struct DetachedTabKey: Hashable {
+        let groupID: String
+        let displayID: CGDirectDisplayID
+    }
+    var detachedTabs: [DetachedTabKey: EdgeDockController] = [:]
     var statusItem: NSStatusItem!
     var settingsWindow: NSWindow?
     var subscriptions = Set<AnyCancellable>()
@@ -187,7 +191,9 @@ final class AppCoordinator: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             manager.edgeFrame = { [weak self] id, screen in
                 guard let self else { return nil }
-                if let group = self.settings.detachedGroup(for: id) { return self.detachedTabs[group.id]?.returnFrame(for: id) }
+                if let group = self.settings.detachedGroup(for: id) {
+                    return self.detachedTab(for: group.id, on: screen)?.returnFrame(for: id)
+                }
                 if self.store?.note(id: id)?.attachedAppBundleIdentifier != nil {
                     return self.appTabs?.returnFrame(for: id)
                 }
@@ -230,21 +236,32 @@ final class AppCoordinator: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    static func detachedTabKeys(groups: [SettingsStore.DetachedGroup], activeIDs: Set<String>, displayIDs: Set<CGDirectDisplayID>) -> Set<DetachedTabKey> {
+        Set(groups.filter { !$0.noteIDs.allSatisfy { !activeIDs.contains($0) } }.flatMap { group in
+            displayIDs.map { DetachedTabKey(groupID: group.id, displayID: $0) }
+        })
+    }
+
+    private func detachedTab(for groupID: String, on screen: NSScreen?) -> EdgeDockController? {
+        if let displayID = EdgeDockController.displayID(for: screen ?? NSScreen.main),
+           let tab = detachedTabs[DetachedTabKey(groupID: groupID, displayID: displayID)] { return tab }
+        return detachedTabs.first { $0.key.groupID == groupID }?.value
+    }
+
     func synchronizeDetachedTabs() {
         guard let store, let windows else { return }
-        let activeIDs = Set(store.active.map(\.id))
-        let groups = settings.detachedGroups.filter { !$0.noteIDs.allSatisfy { !activeIDs.contains($0) } }
-        let ids = Set(groups.map(\.id))
-        for id in Array(detachedTabs.keys) where !ids.contains(id) { detachedTabs.removeValue(forKey: id)?.stop() }
-        for group in groups {
-            if detachedTabs[group.id] == nil {
-                detachedTabs[group.id] = EdgeDockController(store: store, settings: settings, displayID: group.displayID,
-                    privacy: privacy, focus: windows.focus, groupID: group.id,
+        let keys = Self.detachedTabKeys(groups: settings.detachedGroups, activeIDs: Set(store.active.map(\.id)),
+                                       displayIDs: Set(NSScreen.screens.compactMap { EdgeDockController.displayID(for: $0) }))
+        for key in Array(detachedTabs.keys) where !keys.contains(key) { detachedTabs.removeValue(forKey: key)?.stop() }
+        for key in keys {
+            if detachedTabs[key] == nil {
+                detachedTabs[key] = EdgeDockController(store: store, settings: settings, displayID: key.displayID,
+                    privacy: privacy, focus: windows.focus, groupID: key.groupID,
                     tearOff: { [weak windows] id, point in windows?.tearOff(id, at: point) },
                     open: { [weak windows] id, frame in windows?.open(id, near: nil, from: frame) },
-                    create: { [weak self] in self?.createNote(on: NSScreen.screens.first { EdgeDockController.displayID(for: $0) == group.displayID }, detachedGroup: group.id) })
+                    create: { [weak self] in self?.createNote(on: NSScreen.screens.first { EdgeDockController.displayID(for: $0) == key.displayID }, detachedGroup: key.groupID) })
             }
-            detachedTabs[group.id]?.refreshLayout()
+            detachedTabs[key]?.refreshLayout()
         }
     }
 
@@ -265,7 +282,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     synchronizeDetachedTabs()
                 }
                 if let bundleIdentifier { try await store.setAttachedApp(note.id, bundleIdentifier: bundleIdentifier) }
-                let source = detachedGroup.flatMap { detachedTabs[$0]?.creationFrame() }
+                let source = detachedGroup.flatMap { detachedTab(for: $0, on: screen)?.creationFrame() }
                     ?? (bundleIdentifier != nil ? appTabs?.creationFrame() : EdgeDockController.displayID(for: screen).flatMap { edgeTabs[$0]?.creationFrame() })
                 windows?.open(note.id, near: point, focusTitle: true, from: source)
             } catch { present(error) }

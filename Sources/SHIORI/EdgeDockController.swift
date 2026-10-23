@@ -389,7 +389,7 @@ final class EdgeDockController: NSObject {
             }
         }
         if let id = fixedDisplayID {
-            return NSScreen.screens.first { Self.displayID(for: $0) == id } ?? (groupID == nil ? nil : NSScreen.main)
+            return NSScreen.screens.first { Self.displayID(for: $0) == id }
         }
         if let id = primaryDisplayID,
            let screen = NSScreen.screens.first(where: { Self.displayID(for: $0) == id }) {

@@ -11,7 +11,7 @@ final class GeometryTests: XCTestCase {
         let settings = SettingsStore(defaults: defaults)
         let screen = NSRect(x: -1440, y: -100, width: 1440, height: 900)
         settings.dockDetached("first", at: NSPoint(x: -1400, y: 100), displayID: 7, screen: screen)
-        settings.dockDetached("second", at: NSPoint(x: -1400, y: 130), displayID: 7, screen: screen)
+        settings.dockDetached("second", at: NSPoint(x: -1400, y: 130), displayID: 8, screen: screen)
         XCTAssertEqual(settings.detachedGroups.count, 1)
         XCTAssertEqual(settings.detachedGroups.first?.edge, "left")
         XCTAssertEqual(Set(settings.detachedGroups[0].noteIDs), Set(["first", "second"]))
@@ -23,6 +23,19 @@ final class GeometryTests: XCTestCase {
         XCTAssertNil(reopened.detachedGroup(for: "second"))
         XCTAssertEqual(reopened.detachedGroup(for: "first")?.noteIDs, ["first"])
         XCTAssertEqual(reopened.detachedGroup(for: "third")?.edge, "right")
+    }
+
+    @MainActor
+    func testDetachedStacksAppearOnEveryConnectedDisplay() {
+        let group = SettingsStore.DetachedGroup(displayID: 7, edge: "left", anchor: 0.5, noteIDs: ["a", "b", "c"])
+        let inactive = SettingsStore.DetachedGroup(displayID: 7, edge: "right", anchor: 0.2, noteIDs: ["archived"])
+        let activeIDs: Set<String> = ["a", "b", "c", "d", "e", "f", "g"]
+        let laptop = AppCoordinator.DetachedTabKey(groupID: group.id, displayID: 7)
+        let external = AppCoordinator.DetachedTabKey(groupID: group.id, displayID: 8)
+        XCTAssertEqual(AppCoordinator.detachedTabKeys(groups: [group, inactive], activeIDs: activeIDs, displayIDs: [7, 8]), [laptop, external])
+        XCTAssertEqual(AppCoordinator.detachedTabKeys(groups: [group], activeIDs: activeIDs, displayIDs: [8]), [external])
+        XCTAssertTrue(AppCoordinator.detachedTabKeys(groups: [group], activeIDs: [], displayIDs: [7, 8]).isEmpty)
+        XCTAssertTrue(AppCoordinator.detachedTabKeys(groups: [group], activeIDs: activeIDs, displayIDs: []).isEmpty)
     }
 
     @MainActor
