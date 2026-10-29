@@ -71,12 +71,19 @@ enum MarkdownFormattingEngine {
             let prefix = format == .h1 ? "# " : format == .h2 ? "## " : format == .bullet ? "- " : "- [ ] "
             var lines = original.components(separatedBy: "\n")
             let count = lines.count - (original.hasSuffix("\n") ? 1 : 0)
+            let listItems = Dictionary(uniqueKeysWithValues: ChecklistEngine.listItems(in: text).map { ($0.lineRange.location, $0) })
             let allPrefixed = lines.prefix(count).allSatisfy { $0.hasPrefix(prefix) && !(format == .bullet && $0.hasPrefix("- [")) }
+            var lineLocation = range.location
             for index in 0..<count {
                 let line = lines[index]
+                defer { lineLocation += line.utf16.count + 1 }
                 if allPrefixed { lines[index] = String(line.dropFirst(prefix.count)); continue }
-                let pattern = #"^(#{1,6} |[-*] \[[ xX]\] |[-*] )"#
-                lines[index] = prefix + line.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+                if let item = listItems[lineLocation] {
+                    let content = (line as NSString).substring(from: item.contentRange.location - lineLocation)
+                    lines[index] = item.indentation + prefix + content
+                } else {
+                    lines[index] = prefix + line.replacingOccurrences(of: #"^#{1,6} "#, with: "", options: .regularExpression)
+                }
             }
             let replacement = lines.joined(separator: "\n")
             let caret = range.location + min(replacement.utf16.count, max(0, selection.location - range.location + replacement.utf16.count - range.length))

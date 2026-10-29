@@ -69,13 +69,15 @@ final class AppCoordinator: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         Task { await load() }
-        settings.objectWillChange.sink { [weak self] in
-            Task { @MainActor in
-                self?.edgeTabs.values.forEach { $0.refreshLayout() }
-                self?.synchronizeDetachedTabs()
-                self?.windows?.refreshVisibility()
-            }
-        }.store(in: &subscriptions)
+        settings.$detachedGroups.removeDuplicates().dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.synchronizeDetachedTabs(refreshExisting: false) }
+            .store(in: &subscriptions)
+        settings.$acrossSpaces.combineLatest(settings.$fullscreen)
+            .removeDuplicates { $0 == $1 }.dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.windows?.refreshCollectionBehavior() }
+            .store(in: &subscriptions)
         installLifecycleObservers()
     }
     func installLifecycleObservers() {
@@ -248,7 +250,7 @@ final class AppCoordinator: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return detachedTabs.first { $0.key.groupID == groupID }?.value
     }
 
-    func synchronizeDetachedTabs() {
+    func synchronizeDetachedTabs(refreshExisting: Bool = true) {
         guard let store, let windows else { return }
         let keys = Self.detachedTabKeys(groups: settings.detachedGroups, activeIDs: Set(store.active.map(\.id)),
                                        displayIDs: Set(NSScreen.screens.compactMap { EdgeDockController.displayID(for: $0) }))
@@ -260,8 +262,9 @@ final class AppCoordinator: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     tearOff: { [weak windows] id, point in windows?.tearOff(id, at: point) },
                     open: { [weak windows] id, frame in windows?.open(id, near: nil, from: frame) },
                     create: { [weak self] in self?.createNote(on: NSScreen.screens.first { EdgeDockController.displayID(for: $0) == key.displayID }, detachedGroup: key.groupID) })
+            } else if refreshExisting {
+                detachedTabs[key]?.refreshLayout()
             }
-            detachedTabs[key]?.refreshLayout()
         }
     }
 

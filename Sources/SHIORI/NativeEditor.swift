@@ -74,8 +74,7 @@ public struct NativeEditor: NSViewRepresentable {
             .foregroundColor: NSColor.black.withAlphaComponent(0.84),
             .paragraphStyle: paragraphStyle
         ]
-        textView.setBodyFont(bodyFont)
-        textView.refreshChecklistAppearance()
+        if !textView.setBodyFont(bodyFont) { textView.refreshChecklistAppearance() }
 
         let scrollView = NSScrollView(frame: .zero)
         scrollView.drawsBackground = false
@@ -162,11 +161,12 @@ public final class ChecklistTextView: NSTextView, @preconcurrency NSLayoutManage
     private(set) var bodyFont = Theme.bodyFont
     private var pendingBodyFont: NSFont?
 
-    func setBodyFont(_ font: NSFont) {
+    @discardableResult
+    func setBodyFont(_ font: NSFont) -> Bool {
         pendingBodyFont = font
-        guard !hasMarkedText() else { return }
+        guard !hasMarkedText() else { return false }
         pendingBodyFont = nil
-        guard bodyFont != font else { return }
+        guard bodyFont != font else { return false }
         let selection = selectedRanges
         let origin = enclosingScrollView?.contentView.bounds.origin
         bodyFont = font
@@ -177,6 +177,7 @@ public final class ChecklistTextView: NSTextView, @preconcurrency NSLayoutManage
             scroll.contentView.scroll(to: origin)
             scroll.reflectScrolledClipView(scroll.contentView)
         }
+        return true
     }
 
     public override init(frame frameRect: NSRect, textContainer container: NSTextContainer? = nil) {
@@ -230,14 +231,14 @@ public final class ChecklistTextView: NSTextView, @preconcurrency NSLayoutManage
     override public func didChangeText() {
         super.didChangeText()
         if !hasMarkedText() {
-            if let pendingBodyFont { setBodyFont(pendingBodyFont) }
+            if let pendingBodyFont, setBodyFont(pendingBodyFont) { return }
             refreshChecklistAppearance()
         }
     }
 
     override public func unmarkText() {
         super.unmarkText()
-        if let pendingBodyFont { setBodyFont(pendingBodyFont) }
+        if let pendingBodyFont, setBodyFont(pendingBodyFont) { return }
         refreshChecklistAppearance()
     }
 

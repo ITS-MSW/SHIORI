@@ -230,21 +230,24 @@ public final class NoteRepository: @unchecked Sendable {
         body: String,
         updatedAt: Double = Date().timeIntervalSince1970
     ) async throws {
-        try await queue.write { db in
-            try db.execute(
-                sql: "UPDATE note SET title = ?, body = ?, updatedAt = MAX(updatedAt, ?) WHERE id = ? AND archivedAt IS NULL AND deletedAt IS NULL",
-                arguments: [title, body, updatedAt, id]
-            )
-            guard db.changesCount == 1 else { throw NoteRepositoryError.noteUnavailable }
-        }
+        try await updateDraft(id: id, title: title, body: body, updatedAt: updatedAt)
     }
 
     public func updateColor(id: String, colorIndex: Int, updatedAt: Double = Date().timeIntervalSince1970) async throws {
-        let colorIndex = min(max(colorIndex, 0), Note.colorCount - 1)
+        try await updateDraft(id: id, colorIndex: colorIndex, updatedAt: updatedAt)
+    }
+
+    func updateDraft(id: String, title: String? = nil, body: String? = nil, colorIndex: Int? = nil,
+                     updatedAt: Double = Date().timeIntervalSince1970) async throws {
+        let colorIndex = colorIndex.map { min(max($0, 0), Note.colorCount - 1) }
         try await queue.write { db in
             try db.execute(
-                sql: "UPDATE note SET colorIndex = ?, updatedAt = MAX(updatedAt, ?) WHERE id = ? AND archivedAt IS NULL AND deletedAt IS NULL",
-                arguments: [colorIndex, updatedAt, id]
+                sql: """
+                    UPDATE note SET title = COALESCE(?, title), body = COALESCE(?, body),
+                        colorIndex = COALESCE(?, colorIndex), updatedAt = MAX(updatedAt, ?)
+                    WHERE id = ? AND archivedAt IS NULL AND deletedAt IS NULL
+                    """,
+                arguments: [title, body, colorIndex, updatedAt, id]
             )
             guard db.changesCount == 1 else { throw NoteRepositoryError.noteUnavailable }
         }
