@@ -65,6 +65,7 @@ private struct QuickSearchView: View {
     @FocusState private var focused: Bool
     private var results: [Note] { privacy?.search(query, in: store) ?? store.search(query) }
     var body: some View {
+        let results = self.results
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -106,6 +107,7 @@ private struct QuickSearchView: View {
         .background(Button("New Note", action: create).keyboardShortcut("n").hidden())
     }
     private func move(_ delta: Int) {
+        let results = self.results
         guard !results.isEmpty else { return }
         let index = results.firstIndex { $0.id == selectedID } ?? 0
         selectedID = results[min(max(index + delta, 0), results.count - 1)].id

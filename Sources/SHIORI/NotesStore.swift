@@ -36,7 +36,9 @@ public final class NotesStore: ObservableObject {
     private var timers: [String: Task<Void, Never>] = [:]
     private var writes: [String: Task<Void, Error>] = [:]
     private var revision: UInt64 = 0
+    private var collectionOperations = 0
     private var idleWaiters: [CheckedContinuation<Void, Never>] = []
+    private var hasActiveOperations: Bool { !busyIDs.isEmpty || collectionOperations > 0 }
     private let debounce: Duration
     private let maxInterval: Duration
     private let writeOverride: (@Sendable (Note, Bool, Bool) async throws -> Void)?
@@ -57,6 +59,8 @@ public final class NotesStore: ObservableObject {
     }
     @discardableResult
     public func create() async throws -> Note {
+        collectionOperations += 1
+        defer { finishCollectionOperation() }
         let note = try await repository.create()
         notes.insert(note, at: 0)
         saveStates[note.id] = .clean
@@ -148,8 +152,11 @@ public final class NotesStore: ObservableObject {
             do {
                 if let override { try await override(draft.snapshot, draft.textChanged, draft.colorChanged) }
                 else {
-                    if draft.textChanged { try await repository.updateText(id: id, title: draft.snapshot.title, body: draft.snapshot.body, updatedAt: draft.snapshot.updatedAt) }
-                    if draft.colorChanged { try await repository.updateColor(id: id, colorIndex: draft.snapshot.colorIndex, updatedAt: draft.snapshot.updatedAt) }
+                    try await repository.updateDraft(id: id,
+                        title: draft.textChanged ? draft.snapshot.title : nil,
+                        body: draft.textChanged ? draft.snapshot.body : nil,
+                        colorIndex: draft.colorChanged ? draft.snapshot.colorIndex : nil,
+                        updatedAt: draft.snapshot.updatedAt)
                 }
                 if self.pending[id]?.revision == draft.revision {
                     self.pending[id] = nil; self.drafts[id] = nil; self.saveStates[id] = .clean
@@ -226,24 +233,37 @@ public final class NotesStore: ObservableObject {
         }
     }
     public func reorder(ids: [String]) async throws {
+        collectionOperations += 1
+        defer { finishCollectionOperation() }
         try await repository.reorder(ids: ids)
-        for (order, id) in ids.enumerated() {
-            if let index = notes.firstIndex(where: { $0.id == id }) {
-                notes[index].sortIndex = Double(order)
-                pending[id]?.snapshot.sortIndex = Double(order)
-            }
+        let positions = Dictionary(ids.enumerated().map { ($0.element, Double($0.offset)) },
+                                   uniquingKeysWith: { _, latest in latest })
+        var reordered = notes
+        for index in reordered.indices {
+            let id = reordered[index].id
+            guard let position = positions[id] else { continue }
+            reordered[index].sortIndex = position
+            pending[id]?.snapshot.sortIndex = position
         }
+        notes = reordered
     }
     public func reorder(_ ids: [String]) async throws { try await reorder(ids: ids) }
     public func drain() async throws {
         repeat {
-            if !busyIDs.isEmpty { await withCheckedContinuation { idleWaiters.append($0) } }
+            if hasActiveOperations { await withCheckedContinuation { idleWaiters.append($0) } }
             try await flush()
-        } while !busyIDs.isEmpty
+        } while hasActiveOperations
     }
     private func finishOperation(_ id: String) {
         busyIDs.remove(id)
-        if busyIDs.isEmpty {
+        resumeIdleWaiters()
+    }
+    private func finishCollectionOperation() {
+        collectionOperations -= 1
+        resumeIdleWaiters()
+    }
+    private func resumeIdleWaiters() {
+        if !hasActiveOperations {
             let waiters = idleWaiters
             idleWaiters.removeAll()
             waiters.forEach { $0.resume() }

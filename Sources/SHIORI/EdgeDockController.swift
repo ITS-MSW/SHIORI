@@ -94,6 +94,22 @@ final class EdgeDockController: NSObject {
     private var visible = true
     private var positionedDisplayID: CGDirectDisplayID?
 
+    private struct LayoutSettings: Equatable {
+        let compactMode: Bool
+        let edge: String
+        let anchor: Double
+        let groups: [SettingsStore.DetachedGroup]
+        let collectionBehavior: NSWindow.CollectionBehavior
+
+        @MainActor init(_ settings: SettingsStore) {
+            compactMode = settings.compactMode
+            edge = settings.edge
+            anchor = settings.anchor
+            groups = settings.detachedGroups
+            collectionBehavior = settings.collectionBehavior
+        }
+    }
+
     public init(
         store: NotesStore,
         settings: SettingsStore,
@@ -143,6 +159,9 @@ final class EdgeDockController: NSObject {
 
         settingsCancellable = settings.objectWillChange
             .receive(on: RunLoop.main)
+            .map { _ in LayoutSettings(settings) }
+            .prepend(LayoutSettings(settings))
+            .removeDuplicates().dropFirst()
             .sink { [weak self] _ in self?.refreshLayout() }
         storeCancellable = store.$notes.dropFirst()
             .receive(on: RunLoop.main)

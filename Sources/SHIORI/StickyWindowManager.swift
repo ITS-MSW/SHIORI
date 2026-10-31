@@ -580,6 +580,9 @@ final class StickyWindowManager: NSObject, NSWindowDelegate {
         focus.noteID = nil
         refreshVisibility()
     }
+    func refreshCollectionBehavior() {
+        for window in windows.values { window.collectionBehavior = settings.collectionBehavior }
+    }
     func refreshVisibility(resample: Bool = true, onlyIfWindowChanged: Bool = false) {
         if let id = focus.noteID, !store.active.contains(where: { $0.id == id }) { focus.noteID = nil }
         let windowChanged = resample && appAttachment.refreshWindowVisibility()
