@@ -10,7 +10,7 @@ Write in Markdown with clickable checklists, choose a note color and font, and f
 
 ## Install
 
-DMG distribution is prepared for the next release. Once published, download **SHIORI.dmg** from [Releases](https://github.com/ITS-MSW/SHIORI/releases), open it and drag **SHIORI.app** onto **Applications**. Eject the image and open the app from Applications. Quit an older SHIORI before replacing it. The existing 1.0.0 release provides a ZIP instead; extract it and move the app to Applications.
+Download **SHIORI.dmg** from [Releases](https://github.com/ITS-MSW/SHIORI/releases), open it and drag **SHIORI.app** onto **Applications**. Eject the image and open the app from Applications. Quit an older SHIORI before replacing it.
 
 See [distribution and release instructions](docs/releases.md) for local packaging and the draft-release workflow.
 
