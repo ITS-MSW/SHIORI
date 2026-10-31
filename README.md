@@ -10,7 +10,9 @@ Write in Markdown with clickable checklists, choose a note color and font, and f
 
 ## Install
 
-Download the universal macOS ZIP from [Releases](https://github.com/ITS-MSW/SHIORI/releases), extract it, move **SHIORI.app** to **Applications**, then open it. Quit an older SHIORI before replacing it.
+DMG distribution is prepared for the next release. Once published, download **SHIORI.dmg** from [Releases](https://github.com/ITS-MSW/SHIORI/releases), open it and drag **SHIORI.app** onto **Applications**. Eject the image and open the app from Applications. Quit an older SHIORI before replacing it. The existing 1.0.0 release provides a ZIP instead; extract it and move the app to Applications.
+
+See [distribution and release instructions](docs/releases.md) for local packaging and the draft-release workflow.
 
 The deployment target is macOS 14 or later; the app includes Apple silicon and Intel executables. You do not need Xcode to run the download. The build is ad-hoc signed and not notarized by Apple. If macOS blocks it, proceed only if you trust its source: after trying to open it, use **System Settings → Privacy & Security → Open Anyway** if available. See [Apple’s guidance](https://support.apple.com/en-ie/102445).
 
