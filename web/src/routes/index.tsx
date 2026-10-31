@@ -28,8 +28,6 @@ const features = [
   [Command, "Made for your Mac. Free & open source."],
 ] as const;
 
-// Enable once the latest published stable release contains SHIORI.dmg.
-const downloadAvailable = false;
 const downloadUrl = "https://github.com/ITS-MSW/SHIORI/releases/latest/download/SHIORI.dmg";
 
 function Home() {
@@ -60,11 +58,7 @@ function Home() {
             away.
           </Description>
           <div className="hero-actions">
-            {downloadAvailable ? (
-              <Button href={downloadUrl} variant="primary">{downloadContent}</Button>
-            ) : (
-              <Button disabled>{downloadContent}</Button>
-            )}
+            <Button href={downloadUrl} variant="primary">{downloadContent}</Button>
             <Button href="https://github.com/ITS-MSW/SHIORI">
               <Code2 size={17} />
               Get Code
