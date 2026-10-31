@@ -1,3 +1,7 @@
+# SHIORI 1.0.1
+
+Install SHIORI with a universal drag-to-Applications DMG. This release adds the disk image installer and SHA-256 checksum while preserving the existing note-taking features.
+
 Download **SHIORI.dmg** below. Requires macOS 14 or later, on Apple silicon or Intel.
 
 1. Quit any older SHIORI instance.

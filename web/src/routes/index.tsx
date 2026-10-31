@@ -81,7 +81,7 @@ function Home() {
         </section>
         <footer>
           <span>
-            Version 1.0.0{" "}
+            Version 1.0.1{" "}
             <span className="footer-platform">for macOS 14 or later.</span>
           </span>
           <span>
